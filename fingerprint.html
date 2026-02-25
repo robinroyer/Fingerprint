@@ -1775,6 +1775,217 @@ async function runBenchmarks() {
   markDone('benchmarks');
 }
 
+// ─── Extension Fingerprint ─────────────────────────────────────────
+
+async function collectExtensions() {
+  createSection('extfp', '🧩', 'EXTENSION FINGERPRINT');
+  setStatus('Probing installed extensions...');
+
+  // Database: extensions detectable via web-accessible resources
+  // Source: github.com/znck/extension-fingerprints (MIT)
+  const EXT = [
+    // ─── Ad Blockers
+    { n: 'AdBlock', id: 'gighmmpiobklfepjocnamgkkbiglidom', f: 'adblock-uiscripts-adblock-wizard.css', c: 'Ad Blockers' },
+    { n: 'Ghostery', id: 'mlomiejdfkolichcflejclcbmpeaniij', f: 'app/templates/trackers-preview.html', c: 'Ad Blockers' },
+    { n: 'AdBlocker Ultimate', id: 'ohahllgiabjaoigichmmfljhkcfikeof', f: 'lib/content-script/assistant/css/font-awesome.min.css', c: 'Ad Blockers' },
+    { n: 'Total Adblock', id: 'gekdekpbfehejjiecgonmgmepbdnaggp', f: 'assets/img/_brand/icon/120px.png', c: 'Ad Blockers' },
+    { n: 'Adblocker for Youtube™', id: 'maekfnoeejhpjfkfmdlckioggdcdofpg', f: 'css/content.css', c: 'Ad Blockers' },
+    { n: 'Adblock Plus', id: 'cfhdojbkjhnklbpkdaibdccddilifddb', f: 'skin/abp-icon-32.png', c: 'Ad Blockers' },
+    // ─── Privacy / VPN
+    { n: 'DuckDuckGo Privacy', id: 'bkdgflcldnnnapblkhphbgpggdiikppg', f: 'img/logo-small.svg', c: 'Privacy/VPN' },
+    { n: 'ExpressVPN', id: 'fgddmllnllkalaagkghckoinaemmogpe', f: 'html/networkLock.html', c: 'Privacy/VPN' },
+    { n: 'Surfshark VPN', id: 'ailoabdmgclmfmhdagmlohpjlbpffblp', f: 'Roboto-Bold.woff', c: 'Privacy/VPN' },
+    { n: 'Hotspot Shield VPN', id: 'nlbejmccbhkncgokjcmghpfloaajcffj', f: 'static/assets/connection_button/connected.png', c: 'Privacy/VPN' },
+    { n: 'VPN Unlimited', id: 'mpcaainmfjjigeicjnlkdfajbioopjko', f: 'icons/app_icon_connected_128.png', c: 'Privacy/VPN' },
+    { n: 'ClearURLs', id: 'lckanjgmijmafbedlnfblio3fnkbkbmh', f: 'img/clearurls.svg', c: 'Privacy/VPN' },
+    // ─── Password Managers
+    { n: 'LastPass', id: 'hdokiejnpimakedhajhdlcegeplioahd', f: 'overlay.html', c: 'Password Mgr' },
+    { n: 'Dashlane', id: 'fdjamakpfbbddfjaooikfcpapjohcfmg', f: 'content/webui/index.html', c: 'Password Mgr' },
+    { n: 'Bitwarden', id: 'nngceckbapebfimnlniiiahkandclblb', f: 'notification/bar.html', c: 'Password Mgr' },
+    { n: '1Password', id: 'aeblfdkhhhdcdjpifhhbdiojplfjncoa', f: 'inline/menu/menu.html', c: 'Password Mgr' },
+    { n: 'RoboForm', id: 'pnlccmojcmeohlpggmfnbbiapkmbliob', f: 'password-generator.html', c: 'Password Mgr' },
+    { n: 'NordPass', id: 'fooolghllnmhmmndgjiamiiodkpenpbb', f: 'autofill.html', c: 'Password Mgr' },
+    { n: 'Keeper Password Manager', id: 'bfogiafebfohielmmehodmfbbebbbpei', f: 'data/popup/keeperfill.html', c: 'Password Mgr' },
+    // ─── Shopping
+    { n: 'Honey', id: 'bmnlcjabgnpnenekpadlanbbkooimhnj', f: 'checkoutPaypal/paypal/context.js', c: 'Shopping' },
+    { n: 'Rakuten', id: 'chhjbpecpncaggjpdakmflnfcopglcmi', f: 'content/style.css', c: 'Shopping' },
+    { n: 'Capital One Shopping', id: 'nenlahapcbofgnanklpelkaejcehkggg', f: 'GENERATED/analytics.js', c: 'Shopping' },
+    { n: 'Ibotta', id: 'mfaedmjlefifhnhpgipjjiiekchaimpk', f: 'static/media/cash_register.mp3', c: 'Shopping' },
+    // ─── Google Suite
+    { n: 'Google Translate', id: 'aapbdbdomjkkjkaonfhkkikfgjllcleb', f: 'popup_css_compiled.css', c: 'Google Suite' },
+    { n: 'Google Docs Offline', id: 'ghbmnnjooekpmoecnnnilnnbdlolhkhi', f: 'page_embed_script.js', c: 'Google Suite' },
+    { n: 'Google Keep', id: 'lpcaedmchfhocbbapmcbpinfpgnhiddi', f: 'index.html', c: 'Google Suite' },
+    { n: 'Save to Google Drive', id: 'gmbmikajjgmnabiglmofipeabaddhgne', f: 'images/driveicon32.png', c: 'Google Suite' },
+    { n: 'Google Input Tools', id: 'mclkkofklkfljcocdinagocijmpgbhab', f: '_locales/am/messages.json', c: 'Google Suite' },
+    { n: 'Checker Plus for Google Calendar', id: 'hkhggnncdpfibdhinjiegagmopldibha', f: 'options.html', c: 'Google Suite' },
+    // ─── Productivity
+    { n: 'Grammarly', id: 'kbfnbcaeplbcioakkpcpgfkobkghlhen', f: 'src/fonts/0cde50f90fe61871de0af0d24e4d6f6b/extension-inter-light.woff', c: 'Productivity' },
+    { n: 'Loom', id: 'liecbddmkiiihnedobmlmillhodjkdmb', f: 'css/content.css', c: 'Productivity' },
+    { n: 'Screencastify', id: 'mmeijimgabbpbgpdklnllpncmdofkcpn', f: 'cam-frame.html', c: 'Productivity' },
+    { n: 'Evernote Web Clipper', id: 'pioclpoplcdbaefihamjohnefbikjilc', f: 'consent.html', c: 'Productivity' },
+    { n: 'Vidyard', id: 'jiihcciniecimeajcniapbngjjbonjan', f: 'authenticationInner.html', c: 'Productivity' },
+    { n: 'Toggl Track', id: 'oejgccbfbmkkpaidnkphaiaecficdnfn', f: 'html/login.html', c: 'Productivity' },
+    { n: 'Clockify', id: 'pmjeegjhjdlccodhacdgbgfagbpmccpe', f: 'assets/images/$-selected.png', c: 'Productivity' },
+    { n: 'Todoist for Gmail', id: 'clgenfnodoocmhjlnpknojdbjjnmecff', f: 'frame.html', c: 'Productivity' },
+    { n: 'Save to Notion', id: 'ldmmifpegigmeammaeckplhnjbbpccmm', f: 'popup/index.html', c: 'Productivity' },
+    { n: 'Trello (Scrum)', id: 'jdbcdblgjdpmfninkoogcfpnkjmndgje', f: 'images/storypoints-icon.png', c: 'Productivity' },
+    { n: 'Trello (Plus)', id: 'gjjpophepkbhejnglcmkdnncmaanojkf', f: 'manifest.json', c: 'Productivity' },
+    { n: 'Trello (Planyway)', id: 'kkgaechmpjgbojahkofamdjkaljgbdkc', f: 'html/panel.html', c: 'Productivity' },
+    { n: 'Pocket', id: 'milblmloammhichcaklnlkbpjgkjakfd', f: 'img/logo.png', c: 'Productivity' },
+    // ─── Dark Mode
+    { n: 'Dark Reader', id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', f: 'config/browser-css/browser.css', c: 'Dark Mode' },
+    { n: 'Dark Mode', id: 'dmghijelimhndkbmpgbldicpogfkceaj', f: 'data/content_script/page_context/inject.js', c: 'Dark Mode' },
+    { n: 'Night Eye', id: 'alncdjedloppbablonallfbkeiknmkdi', f: 'css/custom-styles.css', c: 'Dark Mode' },
+    // ─── Video / Streaming
+    { n: 'Teleparty (Netflix Party)', id: 'oocalimimngaihdkbihfgmpkcpnmlaoa', f: 'lib/tp_emoji/emoji-picker.json', c: 'Video/Stream' },
+    { n: 'SponsorBlock', id: 'mnjggcdmjocbbbhaepdhchncahnbgone', f: 'icons/LogoSponsorBlocker256px.png', c: 'Video/Stream' },
+    { n: 'vidIQ', id: 'pachckjkecffpdphbpmfolblodfkgbhl', f: 'options.html', c: 'Video/Stream' },
+    { n: 'Video Speed Controller', id: 'nffaoalbilbmmfgbnbgppjihopabppdk', f: 'inject.css', c: 'Video/Stream' },
+    // ─── Developer Tools
+    { n: 'React Developer Tools', id: 'fmkadmapgofadopljbjfkapdkoienihi', f: 'main.html', c: 'Dev Tools' },
+    { n: 'Redux DevTools', id: 'lmhkpmbekcpmknklioeibfkpmmfibljd', f: 'page.bundle.js', c: 'Dev Tools' },
+    { n: 'Vue.js devtools', id: 'nhdogjmejiglipccpnnnanhbledajbpd', f: 'devtools.html', c: 'Dev Tools' },
+    { n: 'Angular DevTools', id: 'ienfalfjdbdpebioblfackkekamfmbnh', f: 'devtools.html', c: 'Dev Tools' },
+    { n: 'Wappalyzer', id: 'gppongmhjkpfnbhagpmjfkannfbllamg', f: 'js/js.js', c: 'Dev Tools' },
+    { n: 'Web Developer', id: 'bfbameneiokkgbdmiekhjnmfkcnldhhm', f: '_locales/en_US/messages.json', c: 'Dev Tools' },
+    { n: 'Octotree (GitHub)', id: 'bkhaagjahfmjljalopjnoealnfndnagc', f: 'fonts/anonymous-pro.woff2', c: 'Dev Tools' },
+    { n: 'Refined GitHub', id: 'hlepfoohegkhhmjieoechaddaejaokhf', f: 'resolve-conflicts.js', c: 'Dev Tools' },
+    { n: 'Tampermonkey', id: 'dhdgffkkebhmkfjojejmpbldmpobfkfo', f: 'tampermonkey.html', c: 'Dev Tools' },
+    { n: 'Violentmonkey', id: 'jinjaccalgkegedbjkdiaebcehnmkjef', f: 'background.html', c: 'Dev Tools' },
+    { n: 'JSON Formatter', id: 'bcjindcccaagfpapjibcdoeiaomchdeh', f: 'manifest.json', c: 'Dev Tools' },
+    // ─── Crypto / Web3
+    { n: 'Coinbase Wallet', id: 'hnfanknocfeofbddgcijnmhnfnkdnaad', f: 'requestProvider.js', c: 'Crypto/Web3' },
+    { n: 'XDEFI Wallet', id: 'hmeobnfnfcmdkdcmlblgagmfpfboieaf', f: 'js/inPage.bundle.js', c: 'Crypto/Web3' },
+    { n: 'MEW CX (MyEtherWallet)', id: 'nlbmnnijcnlegkjjpcfjclmcfggfefdm', f: 'js/cxWeb3.js', c: 'Crypto/Web3' },
+    // ─── Security / AV
+    { n: 'Avast Online Security', id: 'gomekmidlodglbbmalcneegieacbdmki', f: 'common/mocks/empty.js', c: 'Security/AV' },
+    { n: 'Malwarebytes', id: 'ihcjicgdanjaechkgeegckofjjedodee', f: 'app/assets/close-icon.svg', c: 'Security/AV' },
+    { n: 'McAfee Web Control', id: 'jjkchpdmjjdmalgembblgafllbpcjlei', f: 'Resources/mcafee.gif', c: 'Security/AV' },
+    { n: 'Norton Password Manager', id: 'admmjipmmciaobhojoghlmleefbicajg', f: 'content/ui/popup-in-page.html', c: 'Security/AV' },
+    { n: 'Trend Micro Check', id: 'imhhfjfjfhjjjgaedcanngoffjmcblgi', f: '_locales/de/adblock.json', c: 'Security/AV' },
+    // ─── Auth / SSO
+    { n: 'OneLogin', id: 'ioalpmibngobedobkmbhgmajpcfbgbhl', f: 'ui/saveNewAppDialog.html', c: 'Auth/SSO' },
+    { n: 'Microsoft Autofill', id: 'fiedbfgcleddlbcmgdigjgdfcggjcion', f: 'microsoftAutofill.html', c: 'Auth/SSO' },
+    // ─── Communication
+    { n: 'Cisco Webex', id: 'jlhmfgmfgeifomenelglieieghnjghma', f: 'cwcsf-nativemsg-iframe-43c85c0d-d633-af5e-c056-32dc7efc570b.html', c: 'Communication' },
+    { n: 'Zoom Scheduler', id: 'kgjfgplpablkjnlkjmjdecgdpfankdle', f: 'images/loading_24.gif', c: 'Communication' },
+    // ─── Tools / Misc
+    { n: 'Adobe Acrobat', id: 'efaidnbmnnnibpcajpcglclefindmkaj', f: 'viewer.html', c: 'Tools' },
+    { n: 'ColorZilla', id: 'bhlhnicpbhignbdhedgjhgdocnmhomnp', f: 'css/content-style.css', c: 'Tools' },
+    { n: 'ColorPick Eyedropper', id: 'ohcpnigalekghcmgcdcenkpelffpdolg', f: 'img/icon16.png', c: 'Tools' },
+    { n: 'Mercury Reader', id: 'oknpjjbmpnndlpmnhmekjpocelpnlfdi', f: 'app.html', c: 'Tools' },
+    { n: 'Email Tracker (Mailtrack)', id: 'ndnaehgpjlnokgebbaldlmgkapkpjkkb', f: 'images/mailtrack-crx-sprite_2x.png', c: 'Tools' },
+    { n: 'Hunter Email Finder', id: 'hgmhmanijnjhaffoampdlllchpolkdnj', f: 'html/source_popup.html', c: 'Tools' },
+    { n: 'Kami for Google Chrome', id: 'ecnphlgnajanjnkcmbpancdjoidceilk', f: 'content/web/options.html', c: 'Tools' },
+    { n: 'Avast SafePrice', id: 'eofcbnmajmjmplflapaojjnihcjkigck', f: 'common/ui/css/extension.css', c: 'Tools' },
+  ];
+
+  // Protected extensions: use timing comparison (fetch race vs non-existent ID)
+  // These use randomized tokens or strict origin checks — direct fetch returns same error
+  const PROTECTED = [
+    { n: 'uBlock Origin', id: 'cjpalhdlnbpafiamejdnhcphjbkeiagm', f: 'web_accessible_resources/noop.html', c: 'Ad Blockers' },
+    { n: 'AdGuard AdBlocker', id: 'bgnkhhnnamicmpeenaelnjfhikgbkllg', f: 'web-accessible-resources/redirects/1x1-transparent.gif', c: 'Ad Blockers' },
+    { n: 'Privacy Badger', id: 'pkehgijcmpdhfbdbbnkijodmdjhbjlgp', f: 'data/web_accessible_resources/README.md', c: 'Privacy/VPN' },
+    { n: 'Decentraleyes', id: 'ldpochfccmkkmhdbclfhpagapcfdljkj', f: 'resources/webfont/1.5.6/webfont.jsm', c: 'Privacy/VPN' },
+    { n: 'Okta Browser Plugin', id: 'glnpjglilkicbckjpbgcfkogebgllemb', f: 'getFrameId', c: 'Auth/SSO' },
+  ];
+
+  const isChromium = !!window.chrome || navigator.userAgent.includes('Chrome') || navigator.userAgent.includes('Edg');
+
+  if (!isChromium) {
+    setBody('extfp', [
+      row('Browser Support', '<span class="warn">Firefox randomizes extension IDs — chrome-extension:// probing unavailable</span>'),
+      row('Note', 'Window global checks still apply (MetaMask, Phantom)'),
+    ].join(''));
+    collected.extensions = { count: 0, hash: 'N/A', names: [], supported: false };
+    markDone('extfp', false);
+    return;
+  }
+
+  setBody('extfp', row('Status', `<span class="loading">Probing ${EXT.length} extensions in parallel...</span>`));
+
+  // Regular probe — all in parallel
+  const detected = [];
+  try {
+    const probeResults = await Promise.all(
+      EXT.map(ext =>
+        fetch(`chrome-extension://${ext.id}/${ext.f}`)
+          .then(() => ({ ...ext, found: true, method: 'fetch' }))
+          .catch(() => ({ ...ext, found: false }))
+      )
+    );
+    for (const r of probeResults) if (r.found) detected.push(r);
+  } catch(e) {}
+
+  // Timing probe for protected extensions (20 iterations each)
+  setBody('extfp', row('Status', `<span class="loading">Timing probe for ${PROTECTED.length} protected extensions...</span>`));
+  const DUMMY = 'pmlfbbehleledmbphnielafhieceggal';
+  const tfetch = async (url) => { const t = performance.now(); try { await fetch(url); } catch(e) {} return performance.now() - t; };
+  for (const ext of PROTECTED) {
+    try {
+      const url = `chrome-extension://${ext.id}/${ext.f}`;
+      const fakeUrl = `chrome-extension://${DUMMY}/${ext.f}`;
+      let hits = 0, iters = 20;
+      for (let i = 0; i < iters; i++) {
+        const d1 = await tfetch(url);
+        const d2 = await tfetch(fakeUrl);
+        if (d1 > d2) hits++;
+      }
+      if (hits / iters > 0.6) detected.push({ ...ext, found: true, method: 'timing' });
+    } catch(e) {}
+  }
+
+  // Window global checks for extensions that expose no resources
+  try {
+    if (typeof window.ethereum !== 'undefined' && !navigator.brave)
+      detected.push({ n: 'MetaMask', id: 'nkbihfbeogaeaoehlefnkodbefgpgknn', c: 'Crypto/Web3', method: 'window.ethereum' });
+  } catch(e) {}
+  try {
+    if (typeof window.solana !== 'undefined')
+      detected.push({ n: 'Phantom (Solana)', id: 'bfnaelmomeimhlpmgjnjophhpkkoljpa', c: 'Crypto/Web3', method: 'window.solana' });
+  } catch(e) {}
+
+  // Build fingerprint hash from sorted detected IDs
+  const detectedIds = detected.map(e => e.id).sort();
+  const hash = detectedIds.length ? await simpleHash(detectedIds.join(',')) : 'none';
+  collected.extensions = { count: detected.length, hash, names: detected.map(e => e.n), supported: true };
+
+  // Group by category for display
+  const byCat = {};
+  for (const e of detected) {
+    const c = e.c || 'Other';
+    if (!byCat[c]) byCat[c] = [];
+    byCat[c].push(e);
+  }
+
+  const catRows = [];
+  for (const [cat, exts] of Object.entries(byCat)) {
+    catRows.push(`<div style="color:var(--dim);font-size:10px;padding:3px 0 1px;letter-spacing:1px;text-transform:uppercase">${cat}</div>`);
+    for (const e of exts) {
+      const methodBadge = e.method === 'timing' ? ` <span style="color:var(--dim);font-size:10px">[timing]</span>` :
+                          e.method ? ` <span style="color:var(--dim);font-size:10px">[${e.method}]</span>` : '';
+      catRows.push(`<div class="data-row" style="padding:2px 0"><span class="data-key" style="color:var(--dim);min-width:110px;font-size:10px">${e.id.substring(0,8)}…</span><span class="data-val highlight">${e.n}${methodBadge}</span></div>`);
+    }
+  }
+
+  const noDetect = detected.length === 0
+    ? `<div style="color:var(--dim);font-style:italic;padding:6px 0">No detectable extensions found. Extensions using dynamic URLs (MV3) cannot be detected.</div>`
+    : '';
+
+  setBody('extfp', [
+    row('Probed (fetch)', `${EXT.length} extensions`),
+    row('Probed (timing)', `${PROTECTED.length} protected extensions`),
+    row('Probed (globals)', '2 (MetaMask, Phantom)'),
+    row('Detected', `<span class="${detected.length > 0 ? 'highlight' : 'dim'}">${detected.length} extension${detected.length !== 1 ? 's' : ''}</span>`),
+    row('Extension Hash', `<span class="highlight">${hash}</span>`),
+    detected.length > 0
+      ? `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">${catRows.join('')}</div>`
+      : noDetect,
+  ].join(''));
+
+  markDone('extfp');
+}
+
 // ─── Utility ───────────────────────────────────────────────────────
 
 async function simpleHash(str) {
@@ -1833,6 +2044,7 @@ async function buildSummary() {
     ['CPU Bench Score', collected.benchmarks?.intOps ? Number(collected.benchmarks.intOps).toLocaleString() + ' ops/ms' : 'N/A', 'WARN'],
     ['GPU Bench Score', collected.benchmarks?.gpuFill ? collected.benchmarks.gpuFill + ' Mpix/s' : 'N/A', 'WARN'],
     ['First Interaction', collected.behavior?.modality ? `${collected.behavior.modality} @ ${collected.behavior.firstInteraction}ms` : 'No interaction detected', 'WARN'],
+    ['Extensions Detected', collected.extensions?.supported === false ? 'N/A (Firefox)' : `${collected.extensions?.count ?? 0} detected / hash:${collected.extensions?.hash ?? 'N/A'}`, collected.extensions?.count > 0 ? 'HI' : 'OK'],
   ];
 
   const tbody = document.getElementById('summary-body');
@@ -1891,6 +2103,7 @@ async function runScan() {
     () => collectNATInfo(),
     () => collectWASM(),
     () => collectBehavior(),
+    () => collectExtensions(),
     () => runBenchmarks(),
   ];
 
