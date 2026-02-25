@@ -409,6 +409,30 @@ let collected = {};
 let totalSteps = 0;
 let completedSteps = 0;
 
+// ─── Behavioral data — start collecting immediately ─────────────────
+const _behaviorStart = Date.now();
+const _behaviorData = { firstInteraction: null, modality: null, mousePoints: [], scrollEvents: [] };
+(function setupBehaviorListeners() {
+  function onFirst(type) {
+    if (!_behaviorData.firstInteraction) {
+      _behaviorData.firstInteraction = Date.now() - _behaviorStart;
+      _behaviorData.modality = type;
+    }
+  }
+  window.addEventListener('mousemove', e => {
+    onFirst('mouse');
+    if (_behaviorData.mousePoints.length < 20)
+      _behaviorData.mousePoints.push({ x: e.clientX, y: e.clientY, t: Date.now() - _behaviorStart });
+  }, { passive: true });
+  window.addEventListener('touchstart', () => onFirst('touch'), { passive: true });
+  window.addEventListener('keydown', () => onFirst('keyboard'), { passive: true });
+  window.addEventListener('scroll', () => {
+    onFirst('scroll');
+    if (_behaviorData.scrollEvents.length < 5)
+      _behaviorData.scrollEvents.push({ y: window.scrollY, t: Date.now() - _behaviorStart });
+  }, { passive: true });
+})();
+
 // Timestamp
 function updateClock() {
   document.getElementById('ts').textContent = new Date().toISOString().replace('T',' ').split('.')[0] + ' UTC';
@@ -1095,6 +1119,662 @@ function collectWebRTC() {
   markDone('webrtc');
 }
 
+// ─── NEW MODULES ───────────────────────────────────────────────────
+
+async function collectVoices() {
+  createSection('voices', '🗣️', 'SPEECH SYNTHESIS VOICES');
+  setStatus('Enumerating speech voices...');
+  let voices = [];
+  try {
+    voices = speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      await new Promise(resolve => {
+        speechSynthesis.onvoiceschanged = resolve;
+        setTimeout(resolve, 500);
+      });
+      voices = speechSynthesis.getVoices();
+    }
+  } catch(e) {}
+  const count = voices.length;
+  const langs = [...new Set(voices.map(v => v.lang))].sort();
+  const defaultVoice = voices.find(v => v.default);
+  const localCount = voices.filter(v => v.localService).length;
+  const voiceListStr = voices.map(v => `${v.name}|${v.lang}|${v.localService}`).join(';');
+  const hash = count ? await simpleHash(voiceListStr) : 'N/A';
+  const first10 = voices.slice(0, 10).map(v =>
+    `<div style="font-size:11px;color:var(--text);padding:1px 0">${v.name} <span style="color:var(--dim)">[${v.lang}${v.localService ? ' LOCAL' : ''}${v.default ? ' DEFAULT' : ''}]</span></div>`
+  ).join('');
+  collected.voices = { count, hash, langs: langs.length };
+  setBody('voices', [
+    row('Total Voices', `<span class="highlight">${count}</span>`),
+    row('Unique Languages', langs.length.toString()),
+    row('Local Service', localCount.toString()),
+    row('Remote', (count - localCount).toString()),
+    row('Default Voice', defaultVoice ? `${defaultVoice.name} [${defaultVoice.lang}]` : 'N/A'),
+    row('Voice Hash', `<span class="highlight">${hash}</span>`),
+    `<div class="data-row"><span class="data-key">First 10 Voices</span><span class="data-val">${first10 || 'None available'}</span></div>`,
+  ].join(''));
+  markDone('voices');
+}
+
+async function collectJSPrecision() {
+  createSection('jsprec', '🔬', 'JS ENGINE PRECISION');
+  setStatus('Probing JS engine precision...');
+  const vals = {
+    'Math.tan(-1e300)': Math.tan(-1e300),
+    'Math.sinh(1)': Math.sinh(1),
+    'Math.acos(0.123456789)': Math.acos(0.123456789),
+    'Math.log(35)': Math.log(35),
+    '0.1 + 0.2': (0.1 + 0.2),
+    'Math.PI': Math.PI,
+  };
+  let stackFmt = 'N/A';
+  try {
+    const stack = new Error().stack || '';
+    if (stack.includes('at ')) stackFmt = 'Chrome/V8 (at-style)';
+    else if (stack.includes('@')) stackFmt = 'Firefox/SpiderMonkey (@-style)';
+    else stackFmt = 'Safari/JavaScriptCore';
+  } catch(e) {}
+  let fnStr = 'N/A';
+  try {
+    const raw = (function(){}).toString();
+    fnStr = raw === 'function (){}' ? 'Normalized' : raw.length <= 12 ? 'Space-normalized' : `Verbatim (${raw.length} chars)`;
+  } catch(e) {}
+  const hashInput = Object.values(vals).join('|') + stackFmt + fnStr;
+  const hash = await simpleHash(hashInput);
+  collected.jsprec = { hash };
+  setBody('jsprec', [
+    ...Object.entries(vals).map(([k, v]) => row(k, v.toString(), 'highlight')),
+    row('Stack Trace Format', stackFmt),
+    row('Function.toString()', fnStr),
+    row('Engine Hash', `<span class="highlight">${hash}</span>`),
+  ].join(''));
+  markDone('jsprec');
+}
+
+async function collectCSSRender() {
+  createSection('cssrender', '🖌️', 'CSS & RENDERING SIGNALS');
+  setStatus('Probing CSS rendering signals...');
+  let scrollbarW = 0;
+  try {
+    const div = document.createElement('div');
+    div.style.cssText = 'overflow:scroll;width:100px;height:100px;position:absolute;left:-9999px;visibility:hidden';
+    document.body.appendChild(div);
+    scrollbarW = div.offsetWidth - div.clientWidth;
+    document.body.removeChild(div);
+  } catch(e) {}
+  let sysFont = 'N/A';
+  try { sysFont = getComputedStyle(document.body).fontFamily; } catch(e) {}
+  const cssChecks = [
+    ['color-scheme', 'color-scheme: light'],
+    ['container-type', 'container-type: inline-size'],
+    ['oklch()', 'color: oklch(70% 0.2 200)'],
+    ['text-wrap: balance', 'text-wrap: balance'],
+    ['accent-color', 'accent-color: red'],
+    ['subgrid', 'grid-template-columns: subgrid'],
+    ['@layer', 'layer()'],
+    ['has()', 'selector(:has(a))'],
+  ];
+  const cssRows = cssChecks.map(([feat, q]) => {
+    let sup = false;
+    try { sup = CSS.supports(q); } catch(e) {}
+    return row(`CSS ${feat}`, sup ? '<span class="highlight">✓ Supported</span>' : '<span class="dim">✗ No</span>');
+  });
+  let emojiW = 0, emojiH = 0;
+  try {
+    const ec = document.createElement('canvas');
+    ec.width = 100; ec.height = 100;
+    const ectx = ec.getContext('2d');
+    ectx.font = '48px serif';
+    ectx.fillText('😀', 10, 70);
+    const id = ectx.getImageData(0, 0, 100, 100).data;
+    let minX = 100, maxX = 0, minY = 100, maxY = 0, found = false;
+    for (let y = 0; y < 100; y++) for (let x = 0; x < 100; x++) {
+      if (id[(y * 100 + x) * 4 + 3] > 0) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        found = true;
+      }
+    }
+    if (found && maxX > minX) { emojiW = maxX - minX; emojiH = maxY - minY; }
+  } catch(e) {}
+  collected.cssrender = { scrollbarW, sysFont };
+  setBody('cssrender', [
+    row('Scrollbar Width', `<span class="${scrollbarW > 0 ? 'warn' : 'highlight'}">${scrollbarW}px (reveals OS/theme)</span>`),
+    row('System Font', sysFont.substring(0, 80)),
+    ...cssRows,
+    row('Emoji Render Size', emojiW > 0 ? `${emojiW} × ${emojiH}px` : 'N/A'),
+  ].join(''));
+  markDone('cssrender');
+}
+
+async function collectWebGLDeep() {
+  createSection('webgldp', '🔌', 'WEBGL DEEP FINGERPRINT');
+  setStatus('Deep WebGL analysis...');
+  const rows = [];
+  let extCount = 0, extHash = 'N/A';
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) throw new Error('WebGL unavailable');
+    const exts = gl.getSupportedExtensions() || [];
+    extCount = exts.length;
+    extHash = await simpleHash(exts.join(','));
+    rows.push(row('Extensions Count', `<span class="highlight">${extCount}</span>`));
+    rows.push(row('Extensions Hash', `<span class="highlight">${extHash}</span>`));
+    for (const [shaderType, typeName] of [[gl.VERTEX_SHADER, 'VERTEX'], [gl.FRAGMENT_SHADER, 'FRAGMENT']]) {
+      try {
+        const p = gl.getShaderPrecisionFormat(shaderType, gl.HIGH_FLOAT);
+        if (p) rows.push(row(`${typeName} HIGH_FLOAT`, `range:[${p.rangeMin},${p.rangeMax}] prec:${p.precision}`));
+      } catch(e) {}
+    }
+    const params = [
+      ['MAX_VERTEX_UNIFORM_VECTORS', gl.MAX_VERTEX_UNIFORM_VECTORS],
+      ['MAX_FRAGMENT_UNIFORM_VECTORS', gl.MAX_FRAGMENT_UNIFORM_VECTORS],
+      ['MAX_VARYING_VECTORS', gl.MAX_VARYING_VECTORS],
+      ['MAX_VERTEX_ATTRIBS', gl.MAX_VERTEX_ATTRIBS],
+      ['MAX_TEXTURE_IMAGE_UNITS', gl.MAX_TEXTURE_IMAGE_UNITS],
+      ['MAX_RENDERBUFFER_SIZE', gl.MAX_RENDERBUFFER_SIZE],
+    ];
+    for (const [name, param] of params) {
+      try { const v = gl.getParameter(param); rows.push(row(name, v !== null ? v.toString() : 'N/A')); } catch(e) {}
+    }
+    try { const r = gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE); rows.push(row('ALIASED_LINE_WIDTH_RANGE', r ? `[${r[0]}, ${r[1]}]` : 'N/A')); } catch(e) {}
+    try { const r = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE); rows.push(row('ALIASED_POINT_SIZE_RANGE', r ? `[${r[0]}, ${r[1]}]` : 'N/A')); } catch(e) {}
+  } catch(e) {
+    rows.push(row('WebGL', 'Not available: ' + e.message));
+  }
+  let gl2 = false;
+  try { gl2 = !!document.createElement('canvas').getContext('webgl2'); } catch(e) {}
+  rows.push(row('WebGL2', gl2 ? '<span class="highlight">✓ Available</span>' : '<span class="dim">✗ No</span>'));
+  let gpuInfo = 'Not available';
+  try {
+    if (navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        const info = await adapter.requestAdapterInfo().catch(() => ({}));
+        gpuInfo = `${info.vendor || 'Unknown vendor'} / ${info.architecture || 'N/A'}`;
+      } else { gpuInfo = 'No adapter found'; }
+    }
+  } catch(e) { gpuInfo = 'API present, failed: ' + e.message.substring(0, 30); }
+  rows.push(row('WebGPU Adapter', `<span class="${gpuInfo !== 'Not available' ? 'highlight' : 'dim'}">${gpuInfo}</span>`));
+  collected.webgldp = { extCount, extHash };
+  setBody('webgldp', rows.join(''));
+  markDone('webgldp');
+}
+
+async function collectPrivMode() {
+  createSection('privmode', '🕵️', 'PRIVATE MODE & HEADLESS');
+  setStatus('Analyzing private/headless signals...');
+  const sig = (key, val, label, cls) =>
+    row(key, `<span class="${cls}" style="margin-right:6px">[${label}]</span>${val}`);
+  const rows = [];
+  const flags = [];
+  const wd = !!navigator.webdriver;
+  flags.push(wd);
+  rows.push(sig('navigator.webdriver', wd ? 'Bot/Selenium detected' : 'Not set', wd ? 'HEADLESS' : 'NORMAL', wd ? 'danger' : 'highlight'));
+  let quotaMB = null;
+  try { const e = await navigator.storage?.estimate(); if (e) quotaMB = Math.round(e.quota / 1048576); } catch(e) {}
+  const smallQuota = quotaMB !== null && quotaMB < 120;
+  flags.push(smallQuota);
+  rows.push(sig('Storage Quota', quotaMB !== null ? `${quotaMB} MB` : 'N/A', smallQuota ? 'SUSPICIOUS' : 'NORMAL', smallQuota ? 'warn' : 'highlight'));
+  const noPlugins = (navigator.plugins?.length ?? 0) === 0;
+  flags.push(noPlugins);
+  rows.push(sig('Plugins Count', (navigator.plugins?.length ?? 0).toString(), noPlugins ? 'SUSPICIOUS' : 'NORMAL', noPlugins ? 'warn' : 'highlight'));
+  const hasChrome = !!window.chrome;
+  flags.push(!hasChrome);
+  rows.push(sig('window.chrome', hasChrome ? 'Present' : 'Absent', hasChrome ? 'NORMAL' : 'SUSPICIOUS', hasChrome ? 'highlight' : 'warn'));
+  const times = Array.from({ length: 10 }, () => Date.now());
+  const allSame = times.every(t => t === times[0]);
+  flags.push(allSame);
+  rows.push(sig('Timing Jitter', allSame ? 'All identical — VM suspected' : 'Varied (normal)', allSame ? 'SUSPICIOUS' : 'NORMAL', allSame ? 'warn' : 'highlight'));
+  const outerZero = window.outerWidth === 0;
+  flags.push(outerZero);
+  rows.push(sig('outerWidth', window.outerWidth.toString(), outerZero ? 'HEADLESS' : 'NORMAL', outerZero ? 'danger' : 'highlight'));
+  const hasPWA = 'onbeforeinstallprompt' in window;
+  rows.push(sig('PWA Support', hasPWA ? 'Available' : 'Not available', hasPWA ? 'NORMAL' : 'SUSPICIOUS', hasPWA ? 'highlight' : 'warn'));
+  const suspicious = flags.filter(Boolean).length;
+  const verdict = suspicious >= 3 ? 'LIKELY HEADLESS / BOT' : suspicious >= 1 ? 'SUSPICIOUS SIGNALS' : 'APPEARS NORMAL';
+  const vCls = suspicious >= 3 ? 'danger' : suspicious >= 1 ? 'warn' : 'highlight';
+  collected.privmode = { suspiciousCount: suspicious, verdict };
+  setBody('privmode', [
+    row('VERDICT', `<span class="${vCls}" style="font-weight:bold">${verdict}</span>`),
+    ...rows,
+  ].join(''));
+  markDone('privmode');
+}
+
+async function collectNATInfo() {
+  createSection('natinfo', '🛰️', 'NETWORK NAT & WEBRTC EXTENDED');
+  setStatus('Analyzing NAT topology via ICE candidates...');
+  const candidateTypes = { host: [], srflx: [], relay: [] };
+  let publicIP = null;
+  try {
+    await new Promise(resolve => {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      pc.createDataChannel('');
+      pc.onicecandidate = e => {
+        if (!e || !e.candidate) { pc.close(); resolve(); return; }
+        const c = e.candidate.candidate;
+        const typeM = c.match(/typ (\w+)/);
+        const ipM = c.match(/(\d+\.\d+\.\d+\.\d+)/);
+        if (typeM) {
+          const t = typeM[1];
+          const ip = ipM ? ipM[1] : 'unknown';
+          if (candidateTypes[t]) candidateTypes[t].push(ip);
+          else candidateTypes[t] = [ip];
+          if (t === 'srflx' && ip && !ip.startsWith('10.') && !ip.startsWith('192.168.') && !ip.match(/^172\.(1[6-9]|2\d|3[01])\./))
+            publicIP = ip;
+        }
+      };
+      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => {});
+      setTimeout(resolve, 3000);
+    });
+  } catch(e) {}
+  const hasHost = candidateTypes.host.length > 0;
+  const hasSrflx = candidateTypes.srflx.length > 0;
+  const hasRelay = candidateTypes.relay.length > 0;
+  let natType, natCls;
+  if (hasRelay) { natType = 'Symmetric / Corporate (TURN relay used)'; natCls = 'danger'; }
+  else if (hasSrflx && hasHost) { natType = 'Moderate NAT (cone)'; natCls = 'warn'; }
+  else if (hasSrflx && !hasHost) { natType = 'Strict NAT (no host candidates)'; natCls = 'warn'; }
+  else if (hasHost && !hasSrflx) { natType = 'Open / No STUN traversal'; natCls = 'highlight'; }
+  else { natType = 'Unknown — no ICE candidates'; natCls = ''; }
+  collected.natinfo = { natType, publicIP, hasRelay, hasSrflx };
+  setBody('natinfo', [
+    row('NAT Type', `<span class="${natCls}">${natType}</span>`),
+    row('Host Candidates', candidateTypes.host.length.toString()),
+    row('Server-Reflexive (srflx)', candidateTypes.srflx.length + (hasSrflx ? ' — STUN traversal OK' : '')),
+    row('Relay Candidates', hasRelay ? `<span class="danger">${candidateTypes.relay.length} — TURN/proxy in use</span>` : '0'),
+    row('Public IP (srflx)', publicIP ? `<span class="danger">${publicIP}</span>` : 'Not exposed'),
+    row('Host IPs (first 3)', candidateTypes.host.slice(0, 3).join(', ') || 'None'),
+  ].join(''));
+  markDone('natinfo');
+}
+
+async function collectWASM() {
+  createSection('wasm', '⚙️', 'WASM CAPABILITIES');
+  setStatus('Probing WebAssembly features...');
+  const rows = [];
+  const features = {};
+  const wasmAvail = typeof WebAssembly !== 'undefined';
+  features.basic = wasmAvail;
+  rows.push(row('WebAssembly', wasmAvail ? '<span class="highlight">✓ Available</span>' : '<span class="danger">✗ Not available</span>'));
+  if (wasmAvail) {
+    // SIMD: minimal wasm with v128.const opcode
+    try {
+      const b = new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,
+        10,15,1,13,0,253,15,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11]);
+      features.simd = WebAssembly.validate(b);
+    } catch(e) { features.simd = false; }
+    rows.push(row('SIMD (v128)', features.simd ? '<span class="highlight">✓ Supported</span>' : '<span class="dim">✗ No</span>'));
+    features.threads = typeof SharedArrayBuffer !== 'undefined';
+    rows.push(row('Threads (SharedArrayBuffer)', features.threads ? '<span class="highlight">✓ Available</span>' : '<span class="dim">✗ No</span>'));
+    features.exceptions = typeof WebAssembly.Tag !== 'undefined';
+    rows.push(row('Exception Handling (Tag)', features.exceptions ? '<span class="highlight">✓ WebAssembly.Tag</span>' : '<span class="dim">✗ No</span>'));
+    // Tail calls: return_call opcode (0x12)
+    try {
+      const b = new Uint8Array([0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,10,6,1,4,0,18,0,11]);
+      features.tailCalls = WebAssembly.validate(b);
+    } catch(e) { features.tailCalls = false; }
+    rows.push(row('Tail Calls', features.tailCalls ? '<span class="highlight">✓ Supported</span>' : '<span class="dim">✗ No</span>'));
+    // Memory64: memory with 64-bit index (flag byte = 4)
+    try {
+      const b = new Uint8Array([0,97,115,109,1,0,0,0,5,3,1,4,1]);
+      features.memory64 = WebAssembly.validate(b);
+    } catch(e) { features.memory64 = false; }
+    rows.push(row('Memory64', features.memory64 ? '<span class="highlight">✓ Supported</span>' : '<span class="dim">✗ No</span>'));
+    const supportedCount = Object.values(features).filter(Boolean).length;
+    rows.push(row('Features Supported', `<span class="highlight">${supportedCount} / ${Object.keys(features).length}</span>`));
+    collected.wasm = { available: true, features, supportedCount };
+  } else {
+    collected.wasm = { available: false, supportedCount: 0 };
+  }
+  setBody('wasm', rows.join(''));
+  markDone('wasm');
+}
+
+async function collectBehavior() {
+  createSection('behavior', '🧠', 'BEHAVIORAL BOOTSTRAP');
+  setStatus('Displaying behavioral signals...');
+  const pts = _behaviorData.mousePoints;
+  let avgSpeed = null;
+  if (pts.length >= 2) {
+    let totalDist = 0, totalTime = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+      totalDist += Math.sqrt(dx*dx + dy*dy);
+      totalTime += Math.max(1, pts[i].t - pts[i-1].t);
+    }
+    avgSpeed = (totalDist / totalTime * 1000).toFixed(1);
+  }
+  const fs = _behaviorData.scrollEvents[0];
+  const renderBody = () => {
+    const pts2 = _behaviorData.mousePoints;
+    let spd = null;
+    if (pts2.length >= 2) {
+      let d = 0, t = 0;
+      for (let i = 1; i < pts2.length; i++) {
+        const dx = pts2[i].x - pts2[i-1].x, dy = pts2[i].y - pts2[i-1].y;
+        d += Math.sqrt(dx*dx + dy*dy); t += Math.max(1, pts2[i].t - pts2[i-1].t);
+      }
+      spd = (d / t * 1000).toFixed(1);
+    }
+    const fs2 = _behaviorData.scrollEvents[0];
+    collected.behavior = { firstInteraction: _behaviorData.firstInteraction, modality: _behaviorData.modality, mousePoints: pts2.length, avgSpeed: spd };
+    return [
+      row('Note', '<span class="dim">Passive collection — interact with page to generate data</span>'),
+      row('Time-to-First-Interaction', _behaviorData.firstInteraction !== null ? `<span class="highlight">${_behaviorData.firstInteraction}ms</span>` : '<span class="loading">waiting...</span>'),
+      row('Input Modality', _behaviorData.modality ? `<span class="highlight">${_behaviorData.modality.toUpperCase()}</span>` : '<span class="loading">waiting...</span>'),
+      row('Mouse Points Captured', `${pts2.length} / 20`),
+      row('Avg Mouse Speed', spd !== null ? `<span class="highlight">${spd} px/s</span>` : pts2.length < 2 ? 'Move mouse to collect' : 'N/A'),
+      row('First Scroll', fs2 ? `at ${fs2.t}ms, Y=${fs2.y}px` : 'No scroll yet'),
+    ].join('');
+  };
+  collected.behavior = { firstInteraction: _behaviorData.firstInteraction, modality: _behaviorData.modality, mousePoints: pts.length, avgSpeed };
+  setBody('behavior', renderBody());
+  markDone('behavior');
+  // Live update after 5s
+  setTimeout(() => {
+    const el = document.getElementById('body-behavior');
+    if (el) el.innerHTML = renderBody();
+  }, 5000);
+}
+
+// ─── Benchmark helper ───────────────────────────────────────────────
+
+function benchBar(label, value, unit, pct, color) {
+  const c = color || (pct > 66 ? 'var(--accent3)' : pct > 33 ? 'var(--warn)' : 'var(--accent2)');
+  const w = Math.min(100, Math.max(0, pct));
+  return `<div class="data-row">
+    <span class="data-key" style="font-size:10px">${label}</span>
+    <span class="data-val">
+      <span style="color:var(--text-bright)">${value} <span style="color:var(--dim)">${unit}</span></span>
+      <div class="latency-bar"><div class="latency-fill" style="width:${w}%;background:${c}"></div></div>
+    </span>
+  </div>`;
+}
+
+async function runBenchmarks() {
+  createSection('benchmarks', '📊', 'PERFORMANCE BENCHMARKS');
+  setStatus('Running benchmarks...');
+  setBody('benchmarks', row('Status', '<span class="loading">Running CPU benchmarks...</span>'));
+  const results = {};
+  const deadline = performance.now() + 5000;
+  const ok = () => performance.now() < deadline;
+  const tick = () => new Promise(r => setTimeout(r, 0));
+
+  // CPU: Integer arithmetic
+  try {
+    if (ok()) {
+      await tick();
+      const n = 10_000_000; let s = 0;
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) s = (s + i) | 0;
+      const ms = performance.now() - t0;
+      results.intOps = { v: Math.round(n / ms), u: 'ops/ms', l: 'Integer Arith (10M adds)' };
+    }
+  } catch(e) {}
+
+  // CPU: Float arithmetic
+  try {
+    if (ok()) {
+      await tick();
+      const n = 1_000_000; let s = 0;
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) s += Math.sqrt(i + 1);
+      const ms = performance.now() - t0;
+      results.floatOps = { v: Math.round(n / ms), u: 'ops/ms', l: 'Float Arith (1M sqrt)' };
+    }
+  } catch(e) {}
+
+  // CPU: Crypto SHA-256 on 1MB
+  try {
+    if (ok()) {
+      await tick();
+      const buf = crypto.getRandomValues(new Uint8Array(1024 * 1024));
+      const t0 = performance.now();
+      await crypto.subtle.digest('SHA-256', buf);
+      const ms = performance.now() - t0;
+      results.cryptoMBps = { v: (1000 / ms).toFixed(1), u: 'MB/s', l: 'Crypto SHA-256 (1MB)' };
+    }
+  } catch(e) {}
+
+  // CPU: JSON parse+stringify
+  try {
+    if (ok()) {
+      await tick();
+      const arr = Array.from({ length: 10000 }, (_, i) => ({ id: i, v: Math.random(), n: 'item' + i }));
+      const n = 100; const t0 = performance.now();
+      for (let i = 0; i < n; i++) JSON.parse(JSON.stringify(arr));
+      const ms = performance.now() - t0;
+      results.jsonOps = { v: (n / ms).toFixed(2), u: 'ops/ms', l: 'JSON parse+stringify (10K×100)' };
+    }
+  } catch(e) {}
+
+  // CPU: String concatenation
+  try {
+    if (ok()) {
+      await tick();
+      const n = 1_000_000; let s = ''; const t0 = performance.now();
+      for (let i = 0; i < n; i++) s = 'str' + i;
+      const ms = performance.now() - t0;
+      results.stringOps = { v: Math.round(n / ms), u: 'ops/ms', l: 'String Concat (1M)' };
+    }
+  } catch(e) {}
+
+  // CPU: Sort 100K floats
+  try {
+    if (ok()) {
+      await tick();
+      const arr = Array.from({ length: 100000 }, () => Math.random());
+      const t0 = performance.now();
+      arr.sort((a, b) => a - b);
+      const ms = Math.round(performance.now() - t0);
+      results.sortMs = { v: ms, u: 'ms', l: 'Sort 100K floats' };
+    }
+  } catch(e) {}
+
+  setBody('benchmarks', row('Status', '<span class="loading">Running memory benchmarks...</span>'));
+  await tick();
+
+  // Memory: ArrayBuffer max alloc
+  try {
+    if (ok()) {
+      let maxMB = 0;
+      for (let mb = 64; mb <= 512; mb += 64) {
+        try { new ArrayBuffer(mb * 1024 * 1024); maxMB = mb; } catch(e) { break; }
+      }
+      results.maxAlloc = { v: maxMB, u: 'MB', l: 'Max ArrayBuffer Alloc' };
+    }
+  } catch(e) {}
+
+  // Memory: Sequential read 10MB
+  try {
+    if (ok()) {
+      await tick();
+      const sz = 10 * 1024 * 1024;
+      const buf = new Uint8Array(sz); let sum = 0;
+      const t0 = performance.now();
+      for (let i = 0; i < sz; i++) sum += buf[i];
+      const ms = performance.now() - t0;
+      results.seqRead = { v: ((sz / 1e9) / (ms / 1000)).toFixed(2), u: 'GB/s', l: 'Sequential Read (10MB)' };
+    }
+  } catch(e) {}
+
+  // Memory: Random read 1M ops on 10MB
+  try {
+    if (ok()) {
+      await tick();
+      const sz = 10 * 1024 * 1024;
+      const buf = new Uint8Array(sz); const n = 1_000_000; let sum = 0;
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) sum += buf[(Math.random() * sz) | 0];
+      const ms = performance.now() - t0;
+      results.randRead = { v: (n / ms / 1000).toFixed(2), u: 'Mops/s', l: 'Random Read (1M ops)' };
+    }
+  } catch(e) {}
+
+  // IO: LocalStorage write 1MB in 1KB chunks
+  try {
+    if (ok()) {
+      await tick();
+      const chunk = 'x'.repeat(1024); const n = 1000;
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) localStorage.setItem('_b' + i, chunk);
+      const ms = performance.now() - t0;
+      for (let i = 0; i < n; i++) localStorage.removeItem('_b' + i);
+      results.lsWrite = { v: Math.round(n / ms * 1000), u: 'KB/s', l: 'LocalStorage Write (1MB)' };
+    }
+  } catch(e) {}
+
+  // IO: IndexedDB write 1000×1KB
+  try {
+    if (ok()) {
+      await tick();
+      const idbVal = await new Promise(resolve => {
+        try {
+          const req = indexedDB.open('_fpb', 1);
+          req.onupgradeneeded = e => e.target.result.createObjectStore('b');
+          req.onsuccess = e => {
+            const db = e.target.result;
+            const chunk = new Uint8Array(1024);
+            const t0 = performance.now();
+            const tx = db.transaction('b', 'readwrite');
+            const store = tx.objectStore('b');
+            for (let i = 0; i < 1000; i++) store.put(chunk, i);
+            tx.oncomplete = () => { const ms = performance.now() - t0; db.close(); indexedDB.deleteDatabase('_fpb'); resolve(Math.round(1000 / ms * 1000)); };
+            tx.onerror = () => resolve(null);
+          };
+          req.onerror = () => resolve(null);
+          setTimeout(() => resolve(null), 3000);
+        } catch(e) { resolve(null); }
+      });
+      if (idbVal !== null) results.idbOps = { v: idbVal, u: 'ops/s', l: 'IndexedDB Write (1K records)' };
+    }
+  } catch(e) {}
+
+  setBody('benchmarks', row('Status', '<span class="loading">Running GPU benchmarks...</span>'));
+  await tick();
+
+  // GPU setup
+  let gl = null;
+  try {
+    const gc = document.createElement('canvas');
+    gc.width = 512; gc.height = 512;
+    gl = gc.getContext('webgl') || gc.getContext('experimental-webgl');
+  } catch(e) {}
+
+  // GPU: Triangle throughput
+  try {
+    if (gl && ok()) {
+      await tick();
+      const vs = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs, 'attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}');
+      gl.compileShader(vs);
+      const fs = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs, 'void main(){gl_FragColor=vec4(1,0,0,1);}');
+      gl.compileShader(fs);
+      const prog = gl.createProgram();
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+      gl.useProgram(prog);
+      const tc = 10000;
+      const verts = new Float32Array(tc * 6);
+      for (let i = 0; i < tc; i++) {
+        const x = (i / tc) * 2 - 1;
+        verts[i*6]=x; verts[i*6+1]=0; verts[i*6+2]=x+0.01; verts[i*6+3]=0.01; verts[i*6+4]=x+0.02; verts[i*6+5]=-0.01;
+      }
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, 'p');
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const frames = 100; const t0 = performance.now();
+      for (let f = 0; f < frames; f++) { gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, tc * 3); }
+      const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.getError();
+      const ms = performance.now() - t0;
+      results.gpuTris = { v: (tc * frames / ms / 1000).toFixed(2), u: 'Mtri/s', l: 'Triangle Throughput (10K×100f)' };
+    }
+  } catch(e) { if (gl) gl.getError(); }
+
+  // GPU: Texture fill rate (clear 1000×)
+  try {
+    if (gl && ok()) {
+      await tick();
+      gl.viewport(0, 0, 512, 512);
+      const frames = 1000; const t0 = performance.now();
+      for (let i = 0; i < frames; i++) gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.getError();
+      const ms = performance.now() - t0;
+      results.gpuFill = { v: (512 * 512 * frames / ms / 1e6).toFixed(1), u: 'Mpix/s', l: 'Texture Fill Rate (512²×1000f)' };
+    }
+  } catch(e) { if (gl) gl.getError(); }
+
+  // GPU: GPGPU heavy fragment shader
+  try {
+    if (gl && ok()) {
+      await tick();
+      const vs2 = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vs2, 'attribute vec2 p;varying vec2 uv;void main(){uv=p*0.5+0.5;gl_Position=vec4(p,0,1);}');
+      gl.compileShader(vs2);
+      const fs2 = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fs2, 'precision highp float;varying vec2 uv;void main(){float v=0.0;for(int i=0;i<1000;i++)v+=sin(float(i)*uv.x)*cos(float(i)*uv.y);gl_FragColor=vec4(v,0,0,1);}');
+      gl.compileShader(fs2);
+      if (gl.getShaderParameter(fs2, gl.COMPILE_STATUS)) {
+        const prog2 = gl.createProgram();
+        gl.attachShader(prog2, vs2); gl.attachShader(prog2, fs2); gl.linkProgram(prog2);
+        gl.useProgram(prog2);
+        const verts2 = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+        const buf2 = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf2);
+        gl.bufferData(gl.ARRAY_BUFFER, verts2, gl.STATIC_DRAW);
+        const loc2 = gl.getAttribLocation(prog2, 'p');
+        gl.enableVertexAttribArray(loc2);
+        gl.vertexAttribPointer(loc2, 2, gl.FLOAT, false, 0, 0);
+        gl.viewport(0, 0, 512, 512);
+        const t0 = performance.now();
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        const px2 = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px2);
+        gl.getError();
+        const ms = performance.now() - t0;
+        // rough: 512*512 pixels × 1000 iterations × 4 flops (sin+cos+mul+add) per pixel
+        const gflops = ((512 * 512 * 1000 * 4) / ms / 1e9 * 1000).toFixed(3);
+        results.gpuGFLOPS = { v: gflops, u: 'GFLOPS (est.)', l: 'GPGPU Compute (512² shader)' };
+        results.gpuFrameMs = { v: ms.toFixed(1), u: 'ms/frame', l: 'GPGPU Frame Time' };
+      }
+    }
+  } catch(e) { if (gl) gl.getError(); }
+
+  // Render all results
+  collected.benchmarks = { intOps: results.intOps?.v, gpuFill: results.gpuFill?.v };
+  const benchRows = [];
+  const hdr = t => `<div style="color:var(--accent);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:2px;padding:6px 0 2px;border-top:1px solid var(--border)">── ${t} ──</div>`;
+  benchRows.push(hdr('CPU'));
+  if (results.intOps)    benchRows.push(benchBar(results.intOps.l,    Number(results.intOps.v).toLocaleString(),  results.intOps.u,    Math.min(100, results.intOps.v / 100000 * 100)));
+  if (results.floatOps)  benchRows.push(benchBar(results.floatOps.l,  Number(results.floatOps.v).toLocaleString(), results.floatOps.u, Math.min(100, results.floatOps.v / 50000 * 100)));
+  if (results.cryptoMBps)benchRows.push(benchBar(results.cryptoMBps.l, results.cryptoMBps.v, results.cryptoMBps.u, Math.min(100, results.cryptoMBps.v / 2000 * 100)));
+  if (results.jsonOps)   benchRows.push(benchBar(results.jsonOps.l,   results.jsonOps.v,   results.jsonOps.u,   Math.min(100, results.jsonOps.v / 5 * 100)));
+  if (results.stringOps) benchRows.push(benchBar(results.stringOps.l, Number(results.stringOps.v).toLocaleString(), results.stringOps.u, Math.min(100, results.stringOps.v / 200000 * 100)));
+  if (results.sortMs)    benchRows.push(benchBar(results.sortMs.l,    results.sortMs.v,    results.sortMs.u,    Math.min(100, Math.max(0, (200 - results.sortMs.v) / 200 * 100))));
+  benchRows.push(hdr('MEMORY / IO'));
+  if (results.maxAlloc)  benchRows.push(benchBar(results.maxAlloc.l,  results.maxAlloc.v,  results.maxAlloc.u,  Math.min(100, results.maxAlloc.v / 512 * 100)));
+  if (results.seqRead)   benchRows.push(benchBar(results.seqRead.l,   results.seqRead.v,   results.seqRead.u,   Math.min(100, results.seqRead.v / 10 * 100)));
+  if (results.randRead)  benchRows.push(benchBar(results.randRead.l,  results.randRead.v,  results.randRead.u,  Math.min(100, results.randRead.v / 100 * 100)));
+  if (results.lsWrite)   benchRows.push(benchBar(results.lsWrite.l,   Number(results.lsWrite.v).toLocaleString(), results.lsWrite.u, Math.min(100, results.lsWrite.v / 5000 * 100)));
+  if (results.idbOps)    benchRows.push(benchBar(results.idbOps.l,    Number(results.idbOps.v).toLocaleString(),  results.idbOps.u,  Math.min(100, results.idbOps.v / 10000 * 100)));
+  benchRows.push(hdr('GPU'));
+  if (results.gpuTris)   benchRows.push(benchBar(results.gpuTris.l,   results.gpuTris.v,   results.gpuTris.u,   Math.min(100, results.gpuTris.v / 100 * 100)));
+  if (results.gpuFill)   benchRows.push(benchBar(results.gpuFill.l,   results.gpuFill.v,   results.gpuFill.u,   Math.min(100, results.gpuFill.v / 10000 * 100)));
+  if (results.gpuGFLOPS) benchRows.push(benchBar(results.gpuGFLOPS.l, results.gpuGFLOPS.v, results.gpuGFLOPS.u, Math.min(100, results.gpuGFLOPS.v / 5 * 100)));
+  if (results.gpuFrameMs)benchRows.push(benchBar(results.gpuFrameMs.l, results.gpuFrameMs.v, results.gpuFrameMs.u, 0, 'var(--dim)'));
+  if (benchRows.length <= 3) benchRows.push(row('Status', '<span class="warn">No benchmarks completed (5s timeout or WebGL unavailable)</span>'));
+  setBody('benchmarks', benchRows.join(''));
+  markDone('benchmarks');
+}
+
 // ─── Utility ───────────────────────────────────────────────────────
 
 async function simpleHash(str) {
@@ -1142,6 +1822,17 @@ async function buildSummary() {
     ['Do Not Track', navigator.doNotTrack || 'Not set', 'OK'],
     ['CPU Benchmark', collected.perf?.cpuTime + 'ms', 'WARN'],
     ['JS Heap', collected.perf?.heapUsed ? collected.perf.heapUsed + ' MB' : 'N/A', 'WARN'],
+    ['Speech Voices', collected.voices ? `${collected.voices.count} voices / hash:${collected.voices.hash}` : 'N/A', 'HI'],
+    ['JS Engine Hash', collected.jsprec?.hash || 'N/A', 'HI'],
+    ['Scrollbar Width', (collected.cssrender?.scrollbarW ?? 'N/A') + 'px (reveals OS/theme)', 'WARN'],
+    ['WebGL Extensions', collected.webgldp ? `${collected.webgldp.extCount} exts / hash:${collected.webgldp.extHash}` : 'N/A', 'HI'],
+    ['Private Mode', collected.privmode?.verdict || 'N/A', collected.privmode?.suspiciousCount >= 3 ? 'HI' : collected.privmode?.suspiciousCount >= 1 ? 'WARN' : 'OK'],
+    ['NAT Type', collected.natinfo?.natType || 'N/A', 'HI'],
+    ['WebRTC Public IP', collected.natinfo?.publicIP || 'Not leaked', collected.natinfo?.publicIP ? 'HI' : 'OK'],
+    ['WASM Support', collected.wasm ? `${collected.wasm.supportedCount} / 5 features` : 'N/A', 'WARN'],
+    ['CPU Bench Score', collected.benchmarks?.intOps ? Number(collected.benchmarks.intOps).toLocaleString() + ' ops/ms' : 'N/A', 'WARN'],
+    ['GPU Bench Score', collected.benchmarks?.gpuFill ? collected.benchmarks.gpuFill + ' Mpix/s' : 'N/A', 'WARN'],
+    ['First Interaction', collected.behavior?.modality ? `${collected.behavior.modality} @ ${collected.behavior.firstInteraction}ms` : 'No interaction detected', 'WARN'],
   ];
 
   const tbody = document.getElementById('summary-body');
@@ -1192,6 +1883,15 @@ async function runScan() {
     () => collectBattery(),
     () => collectPermissions(),
     () => collectMediaDevices(),
+    () => collectVoices(),
+    () => collectJSPrecision(),
+    () => collectCSSRender(),
+    () => collectWebGLDeep(),
+    () => collectPrivMode(),
+    () => collectNATInfo(),
+    () => collectWASM(),
+    () => collectBehavior(),
+    () => runBenchmarks(),
   ];
 
   totalSteps = steps.length;
