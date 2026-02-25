@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FINGERPRINT // SCAN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #020408;
+    --panel: #040d14;
+    --border: #0a3a52;
+    --accent: #00d4ff;
+    --accent2: #ff3c6e;
+    --accent3: #00ff9d;
+    --text: #8ab4c4;
+    --text-bright: #cce8f4;
+    --dim: #2a4a5a;
+    --warn: #ffaa00;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Grid background */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #app {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 30px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .logo {
+    font-family: 'Orbitron', monospace;
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,0.5);
+    letter-spacing: 4px;
+    animation: flicker 6s infinite;
+  }
+
+  .logo span { color: var(--accent2); }
+
+  @keyframes flicker {
+    0%,96%,98%,100% { opacity: 1; }
+    97% { opacity: 0.8; }
+    99% { opacity: 0.9; }
+  }
+
+  .header-meta {
+    flex: 1;
+    text-align: right;
+  }
+
+  .header-meta .timestamp {
+    color: var(--accent3);
+    font-size: 11px;
+  }
+
+  /* Status bar */
+  #status-bar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 10px 16px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent3);
+    box-shadow: 0 0 8px var(--accent3);
+    animation: pulse 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  #status-text { color: var(--text-bright); flex: 1; }
+  #progress-pct { color: var(--accent); font-weight: bold; margin-left: auto; }
+
+  /* Progress bar */
+  #progress-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    height: 4px;
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+
+  #progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent3));
+    width: 0%;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 12px var(--accent);
+  }
+
+  /* Section grid */
+  .sections-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 16px;
+    margin-bottom: 30px;
+  }
+
+  .section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.4s ease, transform 0.4s ease, border-color 0.3s;
+  }
+
+  .section.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .section:hover {
+    border-color: rgba(0,212,255,0.3);
+  }
+
+  .section-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .section-icon { font-size: 14px; }
+  .section-title { color: var(--accent); }
+  .section-status {
+    margin-left: auto;
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .section-status.scanning { color: var(--warn); animation: blink 1s infinite; }
+  .section-status.done { color: var(--accent3); }
+  .section-status.error { color: var(--accent2); }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .section-body { padding: 12px 14px; }
+
+  .data-row {
+    display: flex;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(10,58,82,0.4);
+    align-items: flex-start;
+    font-size: 12px;
+  }
+
+  .data-row:last-child { border-bottom: none; }
+
+  .data-key {
+    color: var(--dim);
+    min-width: 140px;
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .data-val {
+    color: var(--text-bright);
+    word-break: break-all;
+    flex: 1;
+  }
+
+  .data-val.highlight { color: var(--accent3); }
+  .data-val.warn { color: var(--warn); }
+  .data-val.danger { color: var(--accent2); }
+  .data-val.loading { color: var(--dim); font-style: italic; animation: blink 1s infinite; }
+
+  /* Canvas fingerprint display */
+  #canvas-fp-preview {
+    border: 1px solid var(--border);
+    margin: 8px 0;
+    width: 100%;
+    height: 40px;
+    display: block;
+  }
+
+  /* Network latency bar */
+  .latency-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 4px;
+    width: 100%;
+  }
+
+  .latency-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.8s ease;
+  }
+
+  /* Summary table */
+  #summary {
+    margin-top: 30px;
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+  }
+
+  #summary-header {
+    padding: 14px 18px;
+    background: rgba(0,212,255,0.06);
+    border-bottom: 1px solid var(--border);
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  #fingerprint-hash {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--accent3);
+    letter-spacing: 1px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th {
+    text-align: left;
+    padding: 8px 18px;
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,212,255,0.03);
+  }
+
+  td {
+    padding: 7px 18px;
+    border-bottom: 1px solid rgba(10,58,82,0.3);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(0,212,255,0.03); }
+
+  td:nth-child(1) { color: var(--dim); font-size: 11px; width: 200px; }
+  td:nth-child(2) { color: var(--text-bright); word-break: break-all; }
+  td:nth-child(3) {
+    width: 100px;
+    text-align: center;
+    font-size: 10px;
+    font-family: 'Orbitron', monospace;
+    letter-spacing: 1px;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 9px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+  }
+
+  .badge-ok { background: rgba(0,255,157,0.12); color: var(--accent3); border: 1px solid rgba(0,255,157,0.2); }
+  .badge-warn { background: rgba(255,170,0,0.12); color: var(--warn); border: 1px solid rgba(255,170,0,0.2); }
+  .badge-hi { background: rgba(255,60,110,0.12); color: var(--accent2); border: 1px solid rgba(255,60,110,0.2); }
+  .badge-na { background: rgba(42,74,90,0.3); color: var(--dim); border: 1px solid var(--border); }
+
+  .risk-score {
+    font-family: 'Orbitron', monospace;
+    font-size: 32px;
+    font-weight: 900;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid var(--border);
+  }
+
+  footer {
+    margin-top: 30px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <div class="logo">FINGER<span>PRINT</span></div>
+      <div style="font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:4px">BROWSER RECONNAISSANCE SUITE v2.4</div>
+    </div>
+    <div class="header-meta">
+      <div class="timestamp" id="ts"></div>
+      <div style="font-size:10px;color:var(--dim);margin-top:4px">SESSION INITIATED</div>
+    </div>
+  </header>
+
+  <div id="status-bar">
+    <div class="status-dot"></div>
+    <div id="status-text">Initializing scan modules...</div>
+    <div id="progress-pct">0%</div>
+  </div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+
+  <div class="sections-grid" id="sections-grid"></div>
+
+  <div id="summary" style="display:none">
+    <div id="summary-header">
+      ◈ COMPLETE FINGERPRINT SUMMARY
+      <span id="fingerprint-hash"></span>
+    </div>
+    <table id="summary-table">
+      <thead>
+        <tr>
+          <th>VECTOR</th>
+          <th>VALUE</th>
+          <th>RISK</th>
+        </tr>
+      </thead>
+      <tbody id="summary-body"></tbody>
+    </table>
+    <div class="risk-score" id="risk-score"></div>
+  </div>
+
+  <footer>
+    <span>⚠ EDUCATIONAL PURPOSE ONLY — ALL DATA PROCESSED LOCALLY — NO TRANSMISSION</span>
+    <span id="scan-duration"></span>
+  </footer>
+</div>
+
+<script>
+const startTime = Date.now();
+let collected = {};
+let totalSteps = 0;
+let completedSteps = 0;
+
+// Timestamp
+function updateClock() {
+  document.getElementById('ts').textContent = new Date().toISOString().replace('T',' ').split('.')[0] + ' UTC';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function setStatus(msg) {
+  document.getElementById('status-text').textContent = msg;
+}
+
+function setProgress(pct) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent = Math.round(pct) + '%';
+}
+
+// ─── Section builder ───────────────────────────────────────────────
+function createSection(id, icon, title) {
+  const grid = document.getElementById('sections-grid');
+  const sec = document.createElement('div');
+  sec.className = 'section';
+  sec.id = 'sec-' + id;
+  sec.innerHTML = `
+    <div class="section-header">
+      <span class="section-icon">${icon}</span>
+      <span class="section-title">${title}</span>
+      <span class="section-status scanning" id="status-${id}">SCANNING</span>
+    </div>
+    <div class="section-body" id="body-${id}"></div>
+  `;
+  grid.appendChild(sec);
+  requestAnimationFrame(() => { sec.classList.add('visible'); });
+  return sec;
+}
+
+function row(key, val, cls = '') {
+  return `<div class="data-row"><span class="data-key">${key}</span><span class="data-val ${cls}">${val || '<span class="loading">probing...</span>'}</span></div>`;
+}
+
+function setBody(id, html) {
+  document.getElementById('body-' + id).innerHTML = html;
+}
+
+function markDone(id, ok = true) {
+  const el = document.getElementById('status-' + id);
+  if (el) {
+    el.className = 'section-status ' + (ok ? 'done' : 'error');
+    el.textContent = ok ? 'DONE' : 'PARTIAL';
+  }
+  completedSteps++;
+  setProgress((completedSteps / totalSteps) * 100);
+}
+
+// ─── Collectors ────────────────────────────────────────────────────
+
+async function collectBrowser() {
+  createSection('browser', '🌐', 'BROWSER IDENTITY');
+  setStatus('Fingerprinting browser...');
+
+  const ua = navigator.userAgent;
+  const uaData = navigator.userAgentData;
+
+  // Parse UA
+  let browser = 'Unknown', version = 'Unknown', engine = 'Unknown';
+  const chromeM = ua.match(/Chrome\/([\d.]+)/);
+  const ffM = ua.match(/Firefox\/([\d.]+)/);
+  const safariM = ua.match(/Version\/([\d.]+).*Safari/);
+  const edgeM = ua.match(/Edg\/([\d.]+)/);
+  if (edgeM) { browser = 'Edge'; version = edgeM[1]; engine = 'Blink'; }
+  else if (chromeM) { browser = 'Chrome'; version = chromeM[1]; engine = 'Blink'; }
+  else if (ffM) { browser = 'Firefox'; version = ffM[1]; engine = 'Gecko'; }
+  else if (safariM) { browser = 'Safari'; version = safariM[1]; engine = 'WebKit'; }
+
+  let brands = 'N/A';
+  if (uaData && uaData.brands) {
+    brands = uaData.brands.map(b => `${b.brand} ${b.version}`).join(' · ');
+  }
+
+  let highEntropy = {};
+  try {
+    if (uaData) highEntropy = await uaData.getHighEntropyValues([
+      'architecture','model','platform','platformVersion','fullVersionList','uaFullVersion'
+    ]);
+  } catch(e) {}
+
+  const plugins = Array.from(navigator.plugins || []).map(p => p.name).join(', ') || 'None / Hidden';
+
+  collected.browser = { browser, version, engine, ua };
+
+  setBody('browser', [
+    row('Browser', `<span class="highlight">${browser} ${version}</span>`),
+    row('Engine', engine),
+    row('UA Brands', brands),
+    row('Platform', highEntropy.platform || navigator.platform),
+    row('Platform Version', highEntropy.platformVersion || 'N/A'),
+    row('Architecture', highEntropy.architecture || 'N/A'),
+    row('Model', highEntropy.model || 'N/A'),
+    row('Mobile', (uaData?.mobile ?? /Mobi/.test(ua)).toString()),
+    row('Plugins', plugins.substring(0, 120)),
+    row('Cookies Enabled', navigator.cookieEnabled.toString(), navigator.cookieEnabled ? 'highlight' : 'warn'),
+    row('Java Enabled', (navigator.javaEnabled?.() ?? false).toString()),
+    row('Do Not Track', navigator.doNotTrack || 'Not set', navigator.doNotTrack === '1' ? 'highlight' : ''),
+    row('PDF Viewer', (!!navigator.pdfViewerEnabled).toString()),
+  ].join(''));
+  markDone('browser');
+}
+
+function collectScreen() {
+  createSection('screen', '🖥️', 'DISPLAY & SCREEN');
+  setStatus('Analyzing display...');
+
+  const s = screen;
+  const dpr = window.devicePixelRatio;
+  const physW = Math.round(s.width * dpr);
+  const physH = Math.round(s.height * dpr);
+  const diag = Math.round(Math.sqrt(physW*physW + physH*physH));
+  const orient = screen.orientation?.type || (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+  const colorGamut = window.matchMedia('(color-gamut: p3)').matches ? 'P3' :
+                     window.matchMedia('(color-gamut: srgb)').matches ? 'sRGB' : 'Limited';
+  const hdr = window.matchMedia('(dynamic-range: high)').matches;
+  const prefScheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'Dark' : 'Light';
+  const prefMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'Reduced' : 'Full';
+  const prefContrast = window.matchMedia('(prefers-contrast: more)').matches ? 'High' : 'Normal';
+
+  collected.screen = { width: s.width, height: s.height, dpr, colorDepth: s.colorDepth };
+
+  setBody('screen', [
+    row('Logical Resolution', `<span class="highlight">${s.width} × ${s.height}</span>`),
+    row('Physical Resolution', `${physW} × ${physH} (${diag}px diagonal)`),
+    row('Available Space', `${s.availWidth} × ${s.availHeight}`),
+    row('Viewport', `${window.innerWidth} × ${window.innerHeight}`),
+    row('Outer Window', `${window.outerWidth} × ${window.outerHeight}`),
+    row('Device Pixel Ratio', `${dpr}x`, dpr > 1 ? 'highlight' : ''),
+    row('Color Depth', `${s.colorDepth}-bit`),
+    row('Color Gamut', colorGamut),
+    row('HDR Support', hdr.toString()),
+    row('Orientation', orient),
+    row('Color Scheme Pref', prefScheme),
+    row('Motion Pref', prefMotion),
+    row('Contrast Pref', prefContrast),
+  ].join(''));
+  markDone('screen');
+}
+
+function collectHardware() {
+  createSection('hw', '💻', 'HARDWARE SIGNALS');
+  setStatus('Probing hardware...');
+
+  const cores = navigator.hardwareConcurrency || 'N/A';
+  const mem = navigator.deviceMemory || 'N/A';
+  const touch = navigator.maxTouchPoints;
+  const hasTouch = touch > 0;
+  const pointer = window.matchMedia('(pointer: fine)').matches ? 'Fine (Mouse)' :
+                  window.matchMedia('(pointer: coarse)').matches ? 'Coarse (Touch)' : 'None';
+  const hover = window.matchMedia('(hover: hover)').matches ? 'Yes' : 'No';
+
+  // WebGL GPU info
+  let gpu = 'N/A', glVendor = 'N/A', glVersion = 'N/A', glSL = 'N/A';
+  let maxTexSize = 'N/A', maxViewport = 'N/A';
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        gpu = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        glVendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
+      }
+      glVersion = gl.getParameter(gl.VERSION);
+      glSL = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+      maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      maxViewport = vp ? `${vp[0]} × ${vp[1]}` : 'N/A';
+    }
+  } catch(e) {}
+
+  // WebGL2
+  let gl2 = false;
+  try { gl2 = !!document.createElement('canvas').getContext('webgl2'); } catch(e) {}
+
+  collected.hw = { cores, mem, gpu, touch };
+
+  setBody('hw', [
+    row('CPU Logical Cores', `<span class="highlight">${cores}</span>`),
+    row('Device Memory', mem !== 'N/A' ? `${mem} GB (rounded)` : 'N/A (API blocked)'),
+    row('Touch Points', `${touch} (${hasTouch ? 'touch capable' : 'no touch'})`),
+    row('Primary Pointer', pointer),
+    row('Hover Capable', hover),
+    row('GPU Renderer', gpu.substring(0, 60), 'highlight'),
+    row('GPU Vendor', glVendor),
+    row('WebGL Version', glVersion),
+    row('GLSL Version', glSL),
+    row('WebGL2', gl2.toString()),
+    row('Max Texture Size', maxTexSize.toString()),
+    row('Max Viewport', maxViewport),
+  ].join(''));
+  markDone('hw');
+}
+
+function collectLocale() {
+  createSection('locale', '🌍', 'LOCALE & TIMEZONE');
+  setStatus('Detecting locale...');
+
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tzOffset = -new Date().getTimezoneOffset();
+  const locale = navigator.language;
+  const locales = navigator.languages?.join(', ') || locale;
+
+  // DST detection
+  const jan = new Date(2024,0,1).getTimezoneOffset();
+  const jul = new Date(2024,6,1).getTimezoneOffset();
+  const hasDST = jan !== jul;
+
+  // Number/currency format
+  const numFmt = new Intl.NumberFormat().format(1234567.89);
+  const curFmt = (() => { try { return new Intl.NumberFormat(locale, {style:'currency',currency:'EUR'}).format(1234.5); } catch(e) { return 'N/A'; } })();
+  const dateFmt = new Intl.DateTimeFormat(locale).format(new Date());
+  const hour12 = new Intl.DateTimeFormat(locale,{hour:'numeric'}).resolvedOptions().hour12;
+
+  collected.locale = { tz, locale, locales };
+
+  setBody('locale', [
+    row('Timezone', `<span class="highlight">${tz}</span>`),
+    row('UTC Offset', `${tzOffset >= 0 ? '+' : ''}${Math.floor(tzOffset/60)}:${String(Math.abs(tzOffset%60)).padStart(2,'0')}`),
+    row('DST Active', hasDST.toString()),
+    row('Primary Language', locale),
+    row('All Languages', locales),
+    row('Number Format', numFmt),
+    row('Currency Format', curFmt),
+    row('Date Format', dateFmt),
+    row('12-Hour Clock', hour12?.toString() || 'N/A'),
+  ].join(''));
+  markDone('locale');
+}
+
+async function collectNetwork() {
+  createSection('net', '📡', 'NETWORK TOPOLOGY');
+  setStatus('Analyzing network...');
+
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const connType = conn?.type || 'N/A';
+  const effType = conn?.effectiveType || 'N/A';
+  const downlink = conn?.downlink || 'N/A';
+  const rtt = conn?.rtt || 'N/A';
+  const saveData = conn?.saveData || false;
+
+  // Latency probes
+  const probeUrls = [
+    { label: 'DNS (google.com img)', url: 'https://www.google.com/favicon.ico' },
+    { label: 'CDN (cloudflare)', url: 'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js' },
+  ];
+
+  const latencies = [];
+  for (const probe of probeUrls) {
+    try {
+      const t0 = performance.now();
+      await fetch(probe.url + '?t=' + Date.now(), { mode: 'no-cors', cache: 'no-store' });
+      const lat = Math.round(performance.now() - t0);
+      latencies.push({ label: probe.label, lat });
+    } catch(e) {
+      latencies.push({ label: probe.label, lat: null });
+    }
+  }
+
+  // WebRTC local IP leak
+  let localIPs = [];
+  try {
+    await new Promise((resolve) => {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.onicecandidate = e => {
+        if (!e || !e.candidate) { pc.close(); resolve(); return; }
+        const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/g);
+        if (m) m.forEach(ip => { if (!localIPs.includes(ip)) localIPs.push(ip); });
+      };
+      pc.createOffer().then(o => pc.setLocalDescription(o));
+      setTimeout(resolve, 2000);
+    });
+  } catch(e) {}
+
+  const latRows = latencies.map(l => {
+    if (l.lat === null) return row(l.label, 'Failed', 'danger');
+    const color = l.lat < 100 ? 'highlight' : l.lat < 300 ? 'warn' : 'danger';
+    const barWidth = Math.min(100, (l.lat / 500) * 100);
+    const barColor = l.lat < 100 ? 'var(--accent3)' : l.lat < 300 ? 'var(--warn)' : 'var(--accent2)';
+    return `<div class="data-row">
+      <span class="data-key">${l.label}</span>
+      <span class="data-val ${color}">
+        ${l.lat}ms
+        <div class="latency-bar"><div class="latency-fill" style="width:${barWidth}%;background:${barColor}"></div></div>
+      </span>
+    </div>`;
+  }).join('');
+
+  collected.network = { connType, effType, downlink, rtt, localIPs };
+
+  setBody('net', [
+    row('Connection Type', connType),
+    row('Effective Type', `<span class="highlight">${effType}</span>`),
+    row('Est. Downlink', downlink !== 'N/A' ? `${downlink} Mbps` : 'N/A'),
+    row('RTT Hint', rtt !== 'N/A' ? `${rtt}ms` : 'N/A'),
+    row('Data Saver', saveData.toString()),
+    row('WebRTC Local IPs', localIPs.length ? `<span class="danger">${localIPs.join(', ')}</span>` : 'Not leaked'),
+    latRows,
+  ].join(''));
+  markDone('net');
+}
+
+async function collectPerformance() {
+  createSection('perf', '⚡', 'PERFORMANCE SIGNALS');
+  setStatus('Running performance probes...');
+
+  // Navigation timing
+  const nav = performance.getEntriesByType('navigation')[0] || {};
+  const loadTime = nav.loadEventEnd ? Math.round(nav.loadEventEnd - nav.startTime) : 'N/A';
+  const dnsTime = nav.domainLookupEnd ? Math.round(nav.domainLookupEnd - nav.domainLookupStart) : 'N/A';
+  const tcpTime = nav.connectEnd ? Math.round(nav.connectEnd - nav.connectStart) : 'N/A';
+
+  // Memory
+  const mem = performance.memory;
+  const heapUsed = mem ? Math.round(mem.usedJSHeapSize / 1048576) : null;
+  const heapTotal = mem ? Math.round(mem.totalJSHeapSize / 1048576) : null;
+  const heapLimit = mem ? Math.round(mem.jsHeapSizeLimit / 1048576) : null;
+
+  // CPU benchmark
+  const t0 = performance.now();
+  let sum = 0;
+  for (let i = 0; i < 1000000; i++) sum += Math.sqrt(i);
+  const cpuTime = Math.round(performance.now() - t0);
+
+  // Math perf
+  const t1 = performance.now();
+  for (let i = 0; i < 100000; i++) Math.sin(i) * Math.cos(i);
+  const mathTime = Math.round(performance.now() - t1);
+
+  collected.perf = { heapUsed, heapTotal, cpuTime };
+
+  setBody('perf', [
+    row('Page Load Time', loadTime !== 'N/A' ? `${loadTime}ms` : 'N/A'),
+    row('DNS Resolve', dnsTime !== 'N/A' ? `${dnsTime}ms` : 'N/A'),
+    row('TCP Connect', tcpTime !== 'N/A' ? `${tcpTime}ms` : 'N/A'),
+    row('JS Heap Used', heapUsed ? `${heapUsed} MB` : 'N/A (Firefox)'),
+    row('JS Heap Total', heapTotal ? `${heapTotal} MB` : 'N/A'),
+    row('JS Heap Limit', heapLimit ? `${heapLimit} MB` : 'N/A'),
+    row('CPU Bench (1M √)', `${cpuTime}ms`, cpuTime < 10 ? 'highlight' : cpuTime < 50 ? '' : 'warn'),
+    row('Math Bench (100K)', `${mathTime}ms`),
+    row('Timing Resolution', `${performance.now().toString().split('.')[1]?.length || 0} decimals`),
+  ].join(''));
+  markDone('perf');
+}
+
+function collectStorage() {
+  createSection('storage', '💾', 'STORAGE & PRIVACY');
+  setStatus('Testing storage APIs...');
+
+  const checks = {
+    'localStorage': () => { localStorage.setItem('_fp','1'); localStorage.removeItem('_fp'); return true; },
+    'sessionStorage': () => { sessionStorage.setItem('_fp','1'); sessionStorage.removeItem('_fp'); return true; },
+    'IndexedDB': () => !!window.indexedDB,
+    'WebSQL': () => !!window.openDatabase,
+    'Cookies': () => navigator.cookieEnabled,
+    'Cache API': () => !!window.caches,
+    'Service Workers': () => 'serviceWorker' in navigator,
+    'SharedArrayBuffer': () => typeof SharedArrayBuffer !== 'undefined',
+    'Atomics': () => typeof Atomics !== 'undefined',
+  };
+
+  const rows = Object.entries(checks).map(([key, fn]) => {
+    let val, cls;
+    try { val = fn() ? '✓ Available' : '✗ Blocked'; cls = fn() ? 'highlight' : 'warn'; }
+    catch(e) { val = '✗ Blocked'; cls = 'warn'; }
+    return row(key, val, cls);
+  });
+
+  // Storage quota
+  let quota = '';
+  navigator.storage?.estimate?.().then(est => {
+    const used = Math.round(est.usage / 1048576);
+    const total = Math.round(est.quota / 1048576);
+    document.getElementById('body-storage').innerHTML += row('Storage Quota', `${used}MB used / ${total}MB total`);
+  }).catch(() => {});
+
+  collected.storage = { cookies: navigator.cookieEnabled };
+
+  setBody('storage', rows.join('') + row('Storage Quota', '<span class="loading">estimating...</span>'));
+  markDone('storage');
+}
+
+async function collectCanvas() {
+  createSection('canvas', '🎨', 'CANVAS FINGERPRINT');
+  setStatus('Generating canvas fingerprint...');
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 280; canvas.height = 40;
+  const ctx = canvas.getContext('2d');
+
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#f60';
+  ctx.fillRect(125, 1, 62, 20);
+  ctx.fillStyle = '#069';
+  ctx.font = '11pt "Arial"';
+  ctx.fillText('FP: Cwm fjordbank glyphs vext quiz', 2, 1);
+  ctx.fillStyle = 'rgba(102,204,0,0.7)';
+  ctx.font = '18pt "Times New Roman"';
+  ctx.fillText('Cwm fjordbank', 4, 17);
+  ctx.strokeStyle = '#ff2d55';
+  ctx.beginPath(); ctx.arc(50, 50, 50, 0, Math.PI * 2, true); ctx.stroke();
+
+  const dataURL = canvas.toDataURL();
+  const hash = await simpleHash(dataURL);
+
+  // Show preview
+  const preview = document.createElement('canvas');
+  preview.id = 'canvas-fp-preview';
+  preview.width = 280; preview.height = 40;
+  const pctx = preview.getContext('2d');
+  pctx.drawImage(canvas, 0, 0);
+
+  setBody('canvas', `
+    <div class="data-row"><span class="data-key">Render</span><span class="data-val">
+      <canvas id="canvas-fp-preview" width="280" height="40" style="border:1px solid var(--border);margin:4px 0;display:block;width:100%;max-width:280px"></canvas>
+    </span></div>
+    ${row('Fingerprint Hash', `<span class="highlight">${hash}</span>`)}
+    ${row('Data URL Length', dataURL.length + ' chars')}
+    ${row('toDataURL Method', 'image/png')}
+  `);
+  const cv = document.getElementById('canvas-fp-preview');
+  if (cv) { const c = cv.getContext('2d'); c.drawImage(canvas, 0, 0); }
+
+  collected.canvas = { hash };
+  markDone('canvas');
+}
+
+async function collectAudio() {
+  createSection('audio', '🔊', 'AUDIO FINGERPRINT');
+  setStatus('Sampling audio context...');
+
+  let audioFP = 'N/A', sampleRate = 'N/A', channelCount = 'N/A', state = 'N/A';
+  let baseLatency = 'N/A', outputLatency = 'N/A';
+
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    sampleRate = ctx.sampleRate;
+    state = ctx.state;
+    baseLatency = ctx.baseLatency ? ctx.baseLatency.toFixed(6) : 'N/A';
+    outputLatency = ctx.outputLatency ? ctx.outputLatency.toFixed(6) : 'N/A';
+
+    const oscillator = ctx.createOscillator();
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -50;
+    compressor.knee.value = 40;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0;
+    compressor.release.value = 0.25;
+
+    oscillator.type = 'triangle';
+    oscillator.frequency.value = 10000;
+    oscillator.connect(compressor);
+    const dest = ctx.createMediaStreamDestination();
+    compressor.connect(dest);
+    oscillator.start(0);
+
+    const analyser = ctx.createAnalyser();
+    compressor.connect(analyser);
+    analyser.connect(ctx.destination);
+    analyser.fftSize = 1024;
+    const data = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(data);
+    audioFP = await simpleHash(data.slice(0, 50).join(','));
+
+    oscillator.stop();
+    ctx.close();
+  } catch(e) {
+    audioFP = 'Blocked: ' + e.message.substring(0, 30);
+  }
+
+  collected.audio = { audioFP, sampleRate };
+
+  setBody('audio', [
+    row('Audio Fingerprint', `<span class="highlight">${audioFP}</span>`),
+    row('Sample Rate', sampleRate + ' Hz'),
+    row('Context State', state),
+    row('Base Latency', baseLatency !== 'N/A' ? baseLatency + 's' : 'N/A'),
+    row('Output Latency', outputLatency !== 'N/A' ? outputLatency + 's' : 'N/A'),
+  ].join(''));
+  markDone('audio');
+}
+
+function collectFonts() {
+  createSection('fonts', '🔤', 'FONT DETECTION');
+  setStatus('Detecting installed fonts...');
+
+  const testFonts = [
+    'Arial','Helvetica','Times New Roman','Courier New','Verdana','Georgia','Palatino',
+    'Garamond','Bookman','Comic Sans MS','Trebuchet MS','Arial Black','Impact',
+    'Tahoma','Geneva','Lucida Sans','Lucida Console','Symbol','Webdings','Wingdings',
+    'MS Gothic','MS PGothic','Meiryo','Hiragino Sans',
+    'Apple Chancery','Apple Color Emoji','Menlo','Monaco',
+    'Consolas','Calibri','Cambria','Segoe UI','Segoe Print',
+    'Ubuntu','DejaVu Sans','Liberation Sans','Roboto','Open Sans',
+    'Noto Sans','Lato','Montserrat','Raleway','Oswald',
+    'Fira Code','JetBrains Mono','Hack','Source Code Pro',
+    '.SF NS Text','San Francisco',
+  ];
+
+  const baseFont = 'monospace';
+  const testStr = 'mmmmmmmmmmlli';
+  const testSize = '72px';
+  const span = document.createElement('span');
+  span.style.cssText = `font-size:${testSize};position:absolute;left:-9999px;visibility:hidden;`;
+  span.textContent = testStr;
+  document.body.appendChild(span);
+
+  span.style.fontFamily = baseFont;
+  const baseW = span.offsetWidth;
+  const baseH = span.offsetHeight;
+
+  const detected = [];
+  for (const font of testFonts) {
+    span.style.fontFamily = `"${font}", ${baseFont}`;
+    if (span.offsetWidth !== baseW || span.offsetHeight !== baseH) detected.push(font);
+  }
+  document.body.removeChild(span);
+
+  collected.fonts = { detected, count: detected.length };
+
+  setBody('fonts', [
+    row('Detected Count', `<span class="highlight">${detected.length} / ${testFonts.length}</span>`),
+    row('Detected Fonts', detected.join(', ') || 'None'),
+  ].join(''));
+  markDone('fonts');
+}
+
+async function collectPermissions() {
+  createSection('perms', '🔐', 'PERMISSIONS & APIS');
+  setStatus('Querying browser permissions...');
+
+  const permList = [
+    'geolocation','notifications','camera','microphone',
+    'persistent-storage','clipboard-read','clipboard-write',
+    'payment-handler',
+  ];
+
+  const rows = [];
+  for (const perm of permList) {
+    try {
+      const result = await navigator.permissions.query({ name: perm });
+      const cls = result.state === 'granted' ? 'danger' : result.state === 'prompt' ? 'warn' : 'highlight';
+      rows.push(row(perm, `<span class="${cls}">${result.state.toUpperCase()}</span>`));
+    } catch(e) {
+      rows.push(row(perm, '<span class="dim">N/A</span>'));
+    }
+  }
+
+  // API availability checks
+  const apis = {
+    'Bluetooth API': () => !!navigator.bluetooth,
+    'USB API': () => !!navigator.usb,
+    'Serial API': () => !!navigator.serial,
+    'HID API': () => !!navigator.hid,
+    'Gamepad API': () => !!navigator.getGamepads,
+    'Battery API': () => !!navigator.getBattery,
+    'Credential Mgmt': () => !!navigator.credentials,
+    'Payment Request': () => !!window.PaymentRequest,
+    'WebXR': () => !!navigator.xr,
+    'Eye Dropper': () => !!window.EyeDropper,
+    'Screen Wake Lock': () => !!navigator.wakeLock,
+    'Web NFC': () => !!window.NDEFReader,
+    'Web Share': () => !!navigator.share,
+    'MediaDevices': () => !!navigator.mediaDevices,
+  };
+
+  const apiRows = Object.entries(apis).map(([name, fn]) => {
+    try { return row(name, fn() ? '<span class="warn">Available</span>' : '<span class="highlight">N/A</span>'); }
+    catch(e) { return row(name, 'N/A'); }
+  });
+
+  setBody('perms', [...rows, ...apiRows].join(''));
+  markDone('perms');
+}
+
+async function collectBattery() {
+  createSection('battery', '🔋', 'BATTERY & SYSTEM');
+  setStatus('Reading battery info...');
+
+  let rows = [];
+  try {
+    const battery = await navigator.getBattery();
+    const level = Math.round(battery.level * 100);
+    rows = [
+      row('Battery Level', `<span class="${level > 50 ? 'highlight' : level > 20 ? 'warn' : 'danger'}">${level}%</span>`),
+      row('Charging', battery.charging ? '<span class="highlight">Yes</span>' : '<span class="warn">No</span>'),
+      row('Charging Time', battery.chargingTime === Infinity ? 'N/A' : battery.chargingTime + 's'),
+      row('Discharging Time', battery.dischargingTime === Infinity ? 'N/A' : Math.round(battery.dischargingTime / 60) + ' min'),
+    ];
+    collected.battery = { level, charging: battery.charging };
+  } catch(e) {
+    rows = [row('Battery API', 'Not available or blocked')];
+    collected.battery = null;
+  }
+
+  // Additional system signals
+  rows.push(row('Online Status', navigator.onLine ? '<span class="highlight">Online</span>' : '<span class="danger">Offline</span>'));
+  rows.push(row('Concurrent Workers', navigator.hardwareConcurrency || 'N/A'));
+  rows.push(row('User Activation', navigator.userActivation?.hasBeenActive ? 'Yes' : 'No'));
+
+  setBody('battery', rows.join(''));
+  markDone('battery');
+}
+
+async function collectMediaDevices() {
+  createSection('media', '📷', 'MEDIA DEVICES');
+  setStatus('Enumerating media devices...');
+
+  let rows = [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioIn = devices.filter(d => d.kind === 'audioinput');
+    const audioOut = devices.filter(d => d.kind === 'audiooutput');
+    const videoIn = devices.filter(d => d.kind === 'videoinput');
+
+    rows = [
+      row('Microphones', `${audioIn.length} device(s)`, audioIn.length ? 'warn' : 'highlight'),
+      row('Speakers/Headphones', `${audioOut.length} device(s)`),
+      row('Cameras', `${videoIn.length} device(s)`, videoIn.length ? 'warn' : 'highlight'),
+    ];
+
+    // List them (without labels for privacy — labels are empty without permission)
+    devices.forEach((d, i) => {
+      const label = d.label || `${d.kind} ${i}`;
+      rows.push(row(`  Device ${i+1}`, `[${d.kind}] ${label.substring(0,40)}`));
+    });
+
+    // Supported codecs
+    const types = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/mp4;codecs=h264','audio/webm;codecs=opus'];
+    const codecRows = types.map(t => {
+      const sup = MediaRecorder.isTypeSupported(t);
+      return row(t.split(';')[0].split('/')[1] + ':' + t.split('codecs=')[1], sup ? '<span class="highlight">✓</span>' : '<span class="dim">✗</span>');
+    });
+    rows.push(...codecRows);
+
+    collected.media = { audioIn: audioIn.length, videoIn: videoIn.length };
+  } catch(e) {
+    rows = [row('Error', e.message)];
+    collected.media = null;
+  }
+
+  setBody('media', rows.join(''));
+  markDone('media');
+}
+
+function collectWebRTC() {
+  createSection('webrtc', '🛰️', 'WEBRTC & PROTOCOLS');
+  setStatus('Checking WebRTC capabilities...');
+
+  const pc = window.RTCPeerConnection;
+  const capabilities = {
+    'RTCPeerConnection': !!pc,
+    'RTCDataChannel': !!(pc && RTCPeerConnection.prototype.createDataChannel),
+    'getUserMedia': !!(navigator.mediaDevices?.getUserMedia),
+    'Screen Capture': !!(navigator.mediaDevices?.getDisplayMedia),
+    'WebSocket': !!window.WebSocket,
+    'WebTransport': !!window.WebTransport,
+    'QUIC/WebTransport': !!window.WebTransport,
+    'Fetch API': !!window.fetch,
+    'Server-Sent Events': !!window.EventSource,
+    'Push API': !!window.PushManager,
+    'Broadcast Channel': !!window.BroadcastChannel,
+  };
+
+  // STUN servers available
+  const stunServers = ['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'];
+  const rows = Object.entries(capabilities).map(([k,v]) =>
+    row(k, v ? '<span class="highlight">✓</span>' : '<span class="dim">✗</span>')
+  );
+
+  // TLS/HTTP version hint
+  const proto = window.location.protocol;
+  rows.unshift(row('Page Protocol', proto === 'https:' ? '<span class="highlight">HTTPS</span>' : '<span class="danger">HTTP</span>'));
+  rows.push(row('HTTP/2 Support', 'Via performance.timing API'));
+
+  collected.webrtc = { supported: !!pc };
+  setBody('webrtc', rows.join(''));
+  markDone('webrtc');
+}
+
+// ─── Utility ───────────────────────────────────────────────────────
+
+async function simpleHash(str) {
+  try {
+    const data = new TextEncoder().encode(String(str));
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hash)).slice(0,8).map(b => b.toString(16).padStart(2,'0')).join('');
+  } catch(e) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) { h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }
+    return Math.abs(h).toString(16).padStart(8,'0');
+  }
+}
+
+// ─── Summary builder ───────────────────────────────────────────────
+
+async function buildSummary() {
+  setStatus('Building fingerprint summary...');
+
+  const summaryData = [
+    ['Browser', `${collected.browser?.browser} ${collected.browser?.version}`, 'HI'],
+    ['Engine', collected.browser?.engine || 'N/A', 'HI'],
+    ['User Agent', (collected.browser?.ua || '').substring(0, 80) + '...', 'HI'],
+    ['Screen Resolution', `${collected.screen?.width}×${collected.screen?.height}`, 'HI'],
+    ['Physical Resolution', `${Math.round(collected.screen?.width*collected.screen?.dpr)}×${Math.round(collected.screen?.height*collected.screen?.dpr)}`, 'HI'],
+    ['Device Pixel Ratio', collected.screen?.dpr, 'WARN'],
+    ['Color Depth', collected.screen?.colorDepth + '-bit', 'OK'],
+    ['CPU Cores', collected.hw?.cores, 'HI'],
+    ['Device Memory', collected.hw?.mem !== 'N/A' ? collected.hw?.mem + ' GB' : 'Blocked', collected.hw?.mem !== 'N/A' ? 'HI' : 'OK'],
+    ['GPU', (collected.hw?.gpu || 'N/A').substring(0,50), 'HI'],
+    ['Touch Points', collected.hw?.touch, 'WARN'],
+    ['Timezone', collected.locale?.tz, 'HI'],
+    ['Languages', collected.locale?.locales, 'HI'],
+    ['Connection Type', collected.network?.effType, 'WARN'],
+    ['WebRTC Local IP', collected.network?.localIPs?.length ? collected.network.localIPs.join(', ') : 'Not leaked', collected.network?.localIPs?.length ? 'HI' : 'OK'],
+    ['Canvas Hash', collected.canvas?.hash, 'HI'],
+    ['Audio Hash', collected.audio?.audioFP, 'HI'],
+    ['Audio Sample Rate', collected.audio?.sampleRate + ' Hz', 'WARN'],
+    ['Fonts Detected', collected.fonts?.count + ' fonts', 'HI'],
+    ['Battery Level', collected.battery ? collected.battery.level + '%' : 'N/A', collected.battery ? 'WARN' : 'OK'],
+    ['Microphones', collected.media?.audioIn + ' device(s)', collected.media?.audioIn > 0 ? 'WARN' : 'OK'],
+    ['Cameras', collected.media?.videoIn + ' device(s)', collected.media?.videoIn > 0 ? 'WARN' : 'OK'],
+    ['WebRTC Support', collected.webrtc?.supported ? 'Yes' : 'No', collected.webrtc?.supported ? 'HI' : 'OK'],
+    ['Cookies Enabled', navigator.cookieEnabled ? 'Yes' : 'No', navigator.cookieEnabled ? 'WARN' : 'OK'],
+    ['Do Not Track', navigator.doNotTrack || 'Not set', 'OK'],
+    ['CPU Benchmark', collected.perf?.cpuTime + 'ms', 'WARN'],
+    ['JS Heap', collected.perf?.heapUsed ? collected.perf.heapUsed + ' MB' : 'N/A', 'WARN'],
+  ];
+
+  const tbody = document.getElementById('summary-body');
+  tbody.innerHTML = summaryData.map(([key, val, risk]) => {
+    const badge = risk === 'HI' ? '<span class="badge badge-hi">HIGH</span>' :
+                  risk === 'WARN' ? '<span class="badge badge-warn">MED</span>' :
+                  risk === 'OK' ? '<span class="badge badge-ok">LOW</span>' :
+                  '<span class="badge badge-na">N/A</span>';
+    return `<tr><td>${key}</td><td>${val ?? 'N/A'}</td><td>${badge}</td></tr>`;
+  }).join('');
+
+  // Fingerprint hash
+  const fpStr = JSON.stringify(collected);
+  const globalHash = await simpleHash(fpStr);
+  document.getElementById('fingerprint-hash').textContent = `SHA-256: ${globalHash}`;
+
+  // Risk score
+  const hiCount = summaryData.filter(d => d[2] === 'HI').length;
+  const total = summaryData.length;
+  const score = Math.round((hiCount / total) * 100);
+  const scoreEl = document.getElementById('risk-score');
+  const color = score > 70 ? 'var(--accent2)' : score > 40 ? 'var(--warn)' : 'var(--accent3)';
+  scoreEl.innerHTML = `
+    <div style="font-size:11px;color:var(--dim);letter-spacing:3px;margin-bottom:8px;font-family:'Share Tech Mono'">FINGERPRINT IDENTIFIABILITY SCORE</div>
+    <span style="color:${color};text-shadow:0 0 20px ${color}">${score}%</span>
+    <div style="font-size:11px;color:var(--text);letter-spacing:1px;margin-top:8px;font-family:'Share Tech Mono'">${hiCount} HIGH-ENTROPY VECTORS DETECTED</div>
+  `;
+
+  document.getElementById('summary').style.display = 'block';
+  document.getElementById('scan-duration').textContent = `SCAN COMPLETED IN ${((Date.now()-startTime)/1000).toFixed(2)}s`;
+}
+
+// ─── Main orchestrator ──────────────────────────────────────────────
+
+async function runScan() {
+  const steps = [
+    collectBrowser,
+    collectScreen,
+    collectHardware,
+    collectLocale,
+    collectStorage,
+    collectFonts,
+    collectWebRTC,
+    () => collectNetwork(),
+    () => collectPerformance(),
+    () => collectCanvas(),
+    () => collectAudio(),
+    () => collectBattery(),
+    () => collectPermissions(),
+    () => collectMediaDevices(),
+  ];
+
+  totalSteps = steps.length;
+
+  for (const step of steps) {
+    try { await step(); } catch(e) { console.error(e); }
+    await new Promise(r => setTimeout(r, 60));
+  }
+
+  setProgress(100);
+  setStatus('✓ Scan complete — generating fingerprint summary...');
+  document.querySelector('.status-dot').style.background = 'var(--accent3)';
+  document.querySelector('.status-dot').style.animation = 'none';
+
+  await new Promise(r => setTimeout(r, 400));
+  await buildSummary();
+  setStatus('✓ Fingerprint analysis complete. ' + Object.keys(collected).length + ' data vectors collected.');
+}
+
+runScan();
+</script>
+</body>
+</html>
